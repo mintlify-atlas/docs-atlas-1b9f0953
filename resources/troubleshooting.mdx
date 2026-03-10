@@ -1,0 +1,179 @@
+---
+title: Troubleshooting
+description: Common problems and solutions when using git-filter-repo
+---
+
+Solutions to common issues you might encounter when using git-filter-repo.
+
+## Common Problems
+
+### Fresh Clone Required Error
+
+<Warning>
+  If you see an error message like "Aborting: Refusing to destructively overwrite repo history since this does not look like a fresh clone", git-filter-repo is protecting you from accidentally losing your work.
+</Warning>
+
+**Problem:** git-filter-repo refuses to run on your repository.
+
+**Solution:**
+1. Make a fresh clone of your repository: `git clone <url> temp-repo`
+2. Change into the new directory: `cd temp-repo`
+3. Run git-filter-repo on the fresh clone
+4. If you absolutely must run on an existing clone, use `--force` (but understand this is an irreversible operation)
+
+### Commit Hashes Changed Unexpectedly
+
+**Problem:** More commit hashes changed than you expected.
+
+**Explanation:** This is fundamental to how Git works. When you modify a commit:
+- The commit's hash must change
+- All child commits must have new hashes (they reference the parent hash)
+- Even commits you didn't intend to modify may change due to canonicalization
+
+**Common causes of unexpected changes:**
+- Signed commits have signatures stripped
+- Extended headers are removed
+- Non-UTF-8 encoding is converted to UTF-8
+- Non-canonical tree structures are fixed
+
+**Solution:** Use the `--refs` option to limit which commits are rewritten:
+```bash
+git filter-repo --refs <range>
+```
+
+### All Branches Were Rewritten
+
+**Problem:** You only wanted to filter one branch but all branches were affected.
+
+**Explanation:** The tool is called git-filter-**repo** for a reason - it operates on the entire repository by default.
+
+**Solution:** Use the `--refs` option to specify a single branch:
+```bash
+git filter-repo --refs refs/heads/main --path src/
+```
+
+<Note>
+  When you rewrite history, you typically want all branches that depend on the rewritten commits to be updated. Filtering only one branch can lead to inconsistencies.
+</Note>
+
+### Path Filtering Not Working
+
+**Problem:** Files aren't being filtered correctly when using the `--path` option.
+
+**Common mistakes:**
+- Using absolute paths instead of repository-relative paths
+- Adding a leading slash (e.g., `/src/file.c` instead of `src/file.c`)
+- Using backslashes on Windows (use forward slashes instead)
+- Using relative path components like `.` or `..`
+
+**Solution:** Specify paths as Git reports them:
+```bash
+# Correct
+git filter-repo --path Documentation/README.md
+git filter-repo --path src/modules/
+
+# Incorrect - DO NOT USE
+git filter-repo --path /src/file.c
+git filter-repo --path ./src/file.c
+git filter-repo --path src\\file.c
+```
+
+**Tip:** Find correct path names using:
+```bash
+git diff --no-relative --name-only
+git log --no-relative --name-only --format=""
+```
+
+### Empty Commits Created After Filtering
+
+**Problem:** After filtering, you have commits that no longer contain any changes.
+
+**Explanation:** git-filter-repo automatically prunes commits that **become** empty due to filtering, but preserves commits that **started** empty (these are often intentional, for versioning or publishing purposes).
+
+**Behavior:**
+- Commits that become empty are removed
+- Parent relationships are updated to skip pruned commits
+- Merge commits can become non-merge commits if they lose parents
+- Degenerate merges (where parents have been pruned) are also removed if they have no file changes
+
+### Repository Size Didn't Shrink
+
+**Problem:** After filtering out files, the repository is still large.
+
+**Solution:** By default, git-filter-repo automatically cleans up old objects. If this didn't happen:
+
+```bash
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+```
+
+<Warning>
+  Make sure you've verified the filtering results before running these cleanup commands, as they make recovery more difficult.
+</Warning>
+
+### Commit Messages Reference Old Commit IDs
+
+**Problem:** Your commit messages contain references to old commit hashes that no longer exist.
+
+**Solution:** git-filter-repo automatically updates commit message references to use new commit IDs. This happens by default - no special flags needed.
+
+If you need to disable this behavior, you can use filtering callbacks to customize the behavior.
+
+### Performance Issues
+
+**Problem:** git-filter-repo is running slowly on a large repository.
+
+**Tips for better performance:**
+- Ensure you're using Git >= 2.36.0 and Python >= 3.6
+- Run on a local filesystem (not network drives)
+- Close other applications to free up memory
+- For very large repositories, consider filtering in multiple passes
+
+<Note>
+  git-filter-repo is typically orders of magnitude faster than git-filter-branch. If you're experiencing slow performance, verify you're actually running git-filter-repo and not filter-branch.
+</Note>
+
+### Cannot Push After Filtering
+
+**Problem:** Git rejects your push after filtering with an error about non-fast-forward updates.
+
+**Explanation:** You've rewritten history, which means your local branch has diverged from the remote.
+
+**Solution:**
+
+<Warning>
+  Force pushing rewrites public history. Make sure all collaborators are aware and prepared to handle the changes.
+</Warning>
+
+1. **If you're working with others:** Coordinate with your team first
+2. **Force push with lease:** `git push --force-with-lease`
+3. **All collaborators must:** Either delete their clones and re-clone, or rebase their work on the new history
+
+### Tool Requirements Not Met
+
+**Problem:** git-filter-repo won't run.
+
+**Requirements:**
+- Git >= 2.36.0
+- Python 3 >= 3.6
+
+**Check your versions:**
+```bash
+git --version
+python3 --version
+```
+
+**Solution:** Upgrade Git and/or Python to meet the minimum requirements.
+
+## Getting Help
+
+If you're still experiencing issues:
+
+1. Check the [FAQ](/resources/faq) for common questions
+2. Review the [user manual](https://htmlpreview.github.io/?https://github.com/newren/git-filter-repo/blob/docs/html/git-filter-repo.html)
+3. Look through [examples from user-filed issues](https://github.com/newren/git-filter-repo/blob/main/Documentation/examples-from-user-filed-issues.md)
+4. File an issue on the [GitHub repository](https://github.com/newren/git-filter-repo)
+
+<Tip>
+  Before filing an issue, try running your filter-repo command with the `--debug` flag to get more detailed output about what's happening.
+</Tip>

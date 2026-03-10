@@ -1,0 +1,210 @@
+---
+title: Removing Sensitive Data
+description: Safely remove passwords, credentials, and other sensitive information from Git history
+---
+
+Accidentally committing sensitive data like passwords, API keys, or credentials is a common mistake. git-filter-repo provides powerful tools to completely remove this data from your repository history.
+
+<Warning>
+  After removing sensitive data from history, you must:
+  - Rotate any exposed credentials immediately
+  - Force push the cleaned repository
+  - Ask all team members to re-clone (not pull) the repository
+  - Consider the data compromised if it was ever pushed to a public repository
+</Warning>
+
+## Removing Specific Files
+
+To remove a file containing sensitive data from all of history:
+
+<Steps>
+  <Step title="Clone a fresh copy">
+    ```bash
+    git clone https://github.com/example/repo.git
+    cd repo
+    ```
+  </Step>
+
+  <Step title="Remove the file">
+    ```bash
+    git filter-repo --invert-paths --path config/secrets.yml
+    ```
+    
+    The `--invert-paths` flag removes the specified path instead of keeping it.
+  </Step>
+
+  <Step title="Verify removal">
+    ```bash
+    # This should return nothing
+    git log --all --full-history -- config/secrets.yml
+    ```
+  </Step>
+
+  <Step title="Force push">
+    ```bash
+    git remote add origin https://github.com/example/repo.git
+    git push --force --all
+    git push --force --tags
+    ```
+    
+    <Warning>
+      Force pushing rewrites history. Coordinate with your team before doing this.
+    </Warning>
+  </Step>
+</Steps>
+
+## Removing Multiple Files
+
+For removing many files at once, create a file listing all paths to remove:
+
+<Steps>
+  <Step title="Create the paths file">
+    Create `../files-to-delete.txt` with one path per line:
+    ```
+    config/database.yml
+    secrets.env
+    credentials/api-keys.json
+    .env
+    ```
+  </Step>
+
+  <Step title="Remove all listed files">
+    ```bash
+    git filter-repo --invert-paths --paths-from-file ../files-to-delete.txt
+    ```
+  </Step>
+</Steps>
+
+## Removing Files by Pattern
+
+Remove all files matching a specific pattern:
+
+```bash
+# Remove all .env files
+git filter-repo --invert-paths --path-glob '*.env'
+
+# Remove all files in any credentials/ directory
+git filter-repo --invert-paths --path-glob '**/credentials/*'
+```
+
+## Replace Text in Files
+
+For removing sensitive strings embedded in files (like API keys in code):
+
+<Steps>
+  <Step title="Create a replacements file">
+    Create `../replacements.txt` with the format `FIND==>REPLACE`:
+    ```
+    sk_live_abc123def456ghi789jkl==>REDACTED_API_KEY
+    password123==>REDACTED_PASSWORD
+    ```
+    
+    <Note>
+      You can also use regex patterns:
+      ```
+      regex:sk_live_[a-zA-Z0-9]+==>[REDACTED_STRIPE_KEY]
+      ```
+    </Note>
+  </Step>
+
+  <Step title="Apply replacements">
+    ```bash
+    git filter-repo --replace-text ../replacements.txt
+    ```
+  </Step>
+</Steps>
+
+## Advanced: Using Callbacks
+
+For complex removal scenarios, use Python callbacks:
+
+### Remove specific blob by hash
+
+If you know the hash of a sensitive blob:
+
+```bash
+git filter-repo --blob-callback '
+    if blob.original_id == b"f4ede2e944868b9a08401dafeb2b944c7166fd0a":
+        blob.data = b"REDACTED"
+'
+```
+
+### Remove files with specific patterns in name
+
+```bash
+git filter-repo --filename-callback '
+    if b"secret" in filename.lower() or b"password" in filename.lower():
+        return None
+    return filename
+'
+```
+
+## Removing a Directory
+
+To remove an entire directory from history:
+
+```bash
+git filter-repo --path node_modules/secrets/ --invert-paths
+```
+
+## Complete Cleanup Workflow
+
+<Steps>
+  <Step title="Create a fresh clone">
+    ```bash
+    git clone https://github.com/example/repo.git repo-cleanup
+    cd repo-cleanup
+    ```
+  </Step>
+
+  <Step title="Remove sensitive data">
+    ```bash
+    git filter-repo --invert-paths --path-glob '*.env' --path config/secrets.yml
+    ```
+  </Step>
+
+  <Step title="Verify the cleanup">
+    ```bash
+    # Check repository size
+    git count-objects -vH
+    
+    # Verify files are gone
+    git log --all --full-history -- config/secrets.yml
+    ```
+  </Step>
+
+  <Step title="Replace the remote repository">
+    ```bash
+    git remote add origin https://github.com/example/repo.git
+    git push --force --all
+    git push --force --tags
+    ```
+  </Step>
+
+  <Step title="Rotate credentials">
+    Change all exposed passwords, API keys, and credentials immediately.
+  </Step>
+
+  <Step title="Notify team members">
+    Instruct all contributors to delete their local clones and re-clone:
+    ```bash
+    # Team members should run:
+    rm -rf repo
+    git clone https://github.com/example/repo.git
+    ```
+    
+    <Warning>
+      Do not use `git pull` - it will bring back the old history!
+    </Warning>
+  </Step>
+</Steps>
+
+## Post-Cleanup Checklist
+
+- [ ] All sensitive credentials have been rotated
+- [ ] Force push completed successfully
+- [ ] All team members notified to re-clone
+- [ ] GitHub/GitLab support contacted (if needed for server-side cleanup)
+- [ ] Repository size reduced as expected
+- [ ] CI/CD secrets updated
+- [ ] Documentation updated with new credentials (in secure storage)

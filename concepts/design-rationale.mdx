@@ -1,0 +1,312 @@
+---
+title: 'Design Rationale'
+description: 'The 12 design goals that guided the creation of git-filter-repo'
+icon: 'compass'
+---
+
+## Why git-filter-repo Exists
+
+None of the existing repository filtering tools (git filter-branch, BFG Repo Cleaner, manual fast-export/fast-import) provided what was needed. No tool provided any of the first eight traits listed below, and no tool provided more than two of the last four traits.
+
+git-filter-repo was built from the ground up to address all 12 of these design goals.
+
+## The 12 Design Goals
+
+### 1. Starting Report
+
+**Problem**: Users often don't know what to filter or how to begin.
+
+**Solution**: Provide an analysis of the repository to help users understand what to prune or rename.
+
+<Accordion title="How it works">
+  Running `git filter-repo --analyze` generates reports showing:
+  - All paths that have ever existed in the repository
+  - File renames that have occurred
+  - Sizes of objects aggregated by path, directory, extension, and blob ID
+  - Largest files and directories in history
+  
+  This gives users concrete data to make informed filtering decisions.
+</Accordion>
+
+<CodeGroup>
+```bash Example
+git filter-repo --analyze
+ls -la .git/filter-repo/analysis/
+# blob-shas-and-paths.txt
+# directories-all-sizes.txt
+# extensions-all-sizes.txt
+# path-all-sizes.txt
+# renames.txt
+```
+</CodeGroup>
+
+### 2. Keep vs. Remove
+
+**Problem**: Most tools only provide ways to *remove* paths. Specifying all paths to keep requires listing everything that ever existed.
+
+**Solution**: Provide both `--path` (to keep) and `--path-regex` with exclusion patterns.
+
+<Info>
+With `--path`, you specify what to **keep**. Everything else is automatically removed. This is much simpler than having to list every path you want to exclude.
+</Info>
+
+```bash Keep only specific directories
+# Keep only the docs/ and src/ directories
+git filter-repo --path docs/ --path src/
+
+# Everything else in history is removed
+```
+
+### 3. Renaming
+
+**Problem**: Renaming paths was difficult or impossible with existing tools.
+
+**Solution**: Make path renaming easy with sanity checks.
+
+<Accordion title="Renaming capabilities">
+  - Treat a subdirectory as the root: `--subdirectory-filter`
+  - Move root to a subdirectory: `--to-subdirectory-filter`
+  - Rename paths: `--path-rename`
+  - Detect collisions when renames cause multiple files to have the same path
+  - Special handling for commit copies (oldname→newname without modification)
+</Accordion>
+
+```bash Examples
+# Make src/ the new repository root
+git filter-repo --subdirectory-filter src/
+
+# Move everything into a subdirectory
+git filter-repo --to-subdirectory-filter my-module/
+
+# Rename a directory
+git filter-repo --path-rename old-name/:new-name/
+```
+
+### 4. More Intelligent Safety
+
+**Problem**: git filter-branch writes copies of original refs to a special namespace, which is not a user-friendly recovery mechanism.
+
+**Solution**: Detect and require a fresh clone, ensuring users have a good backup.
+
+<Warning>
+History rewriting is **irreversible**. Working from a fresh clone means you can always go back to the original by re-cloning if something goes wrong.
+</Warning>
+
+See [Fresh Clone Requirements](/concepts/fresh-clone) for detailed information.
+
+```bash Safe workflow
+# 1. Clone the repository
+git clone --no-local /path/to/original repo-to-filter
+cd repo-to-filter
+
+# 2. Run filter-repo (it detects this is a fresh clone)
+git filter-repo --path src/
+
+# 3. If anything goes wrong, just delete and re-clone
+```
+
+### 5. Auto Shrink
+
+**Problem**: After filtering, users had to manually remove old cruft and repack. The documented steps didn't always work.
+
+**Solution**: Automatically clean up and repack the repository after filtering.
+
+<Info>
+git-filter-repo automatically:
+- Expires all reflogs
+- Deletes the origin remote (to prevent accidental pushes of rewritten history)
+- Repacks the repository
+- Runs garbage collection
+</Info>
+
+This prevents mixing old and new history and ensures the repository is optimally packed.
+
+### 6. Clean Separation
+
+**Problem**: Mixing old and rewritten repositories together causes confusion and accidental re-pushing of old data.
+
+**Solution**: Remove origin remote and avoid mixing old and new refs.
+
+```bash After filtering
+# The origin remote is automatically removed
+git remote -v
+# (empty)
+
+# This prevents accidentally pushing rewritten history
+# back to the original repository
+```
+
+<Note>
+You need to explicitly add a new remote for your rewritten repository:
+```bash
+git remote add origin https://github.com/user/new-repo.git
+git push -u origin --all
+git push -u origin --tags
+```
+</Note>
+
+### 7. Versatility
+
+**Problem**: Shell-based filtering is:
+- OS-dependent
+- Has poor string manipulation
+- Requires forking processes
+- Lacks rich data structures
+
+**Solution**: Provide extensibility through Python, with callbacks and library usage.
+
+<CardGroup cols={2}>
+  <Card title="Command-Line Flags" icon="flag">
+    Simple flags for common operations like `--path`, `--replace-text`, `--mailmap`
+  </Card>
+  <Card title="Python Callbacks" icon="code">
+    Register functions to process specific data types or Git objects
+  </Card>
+  <Card title="Python Library" icon="book">
+    Import filter-repo as a module to build custom tools
+  </Card>
+  <Card title="Rich Data Structures" icon="database">
+    Use Python's dicts, lists, and objects instead of shell variables
+  </Card>
+</CardGroup>
+
+```python Callback example
+def my_filename_filter(filename):
+    # Custom logic to rename files
+    return filename.replace(b'_', b'-')
+
+args = fr.FilteringOptions.parse_args(['--force'])
+args.filename_callback = my_filename_filter
+filter = fr.RepoFilter(args)
+filter.run()
+```
+
+### 8. Old Commit References
+
+**Problem**: After rewriting, old commit IDs in emails, issues, and documentation become invalid.
+
+**Solution**: Provide a mapping from old to new commit IDs via `refs/replace/` references.
+
+```bash Using the mapping
+# After filtering with --replace-refs
+git log old-commit-id
+# Shows the new commit!
+
+# The old ID is automatically mapped to the new one
+```
+
+### 9. Commit Message Consistency
+
+**Problem**: Commit messages often reference other commits by SHA-1 ("reverts commit abc123", "fixes commit def456"). After rewriting, these references are invalid.
+
+**Solution**: Automatically rewrite commit message references to use new commit IDs.
+
+<Info>
+git-filter-repo detects patterns like:
+- "reverts commit abc123"
+- "fixes def456"
+- "see commit abc123def456"
+
+And updates them to reference the new commit IDs.
+</Info>
+
+### 10. Become-Empty Pruning
+
+**Problem**: Commits that become empty due to filtering should be pruned, but git filter-branch:
+- Misses commits that should be pruned
+- Prunes commits that *started* empty (which may be intentional)
+
+**Solution**: Intelligently prune commits that *become* empty, not those that *started* empty.
+
+<Accordion title="How empty commit pruning works">
+  1. If a commit's file changes are all filtered out, the commit becomes empty
+  2. If the commit's parent is also pruned, use the first non-pruned ancestor as the new parent
+  3. If no non-pruned ancestor exists and it's not a merge, make it a new root commit
+  4. If it's a merge with no non-pruned ancestors, remove that parent (potentially making it a non-merge)
+  5. Preserve commits that were empty from the start (often used for versioning/releases)
+</Accordion>
+
+### 11. Become-Degenerate Pruning
+
+**Problem**: Pruning commits can cause topology changes. Merge commits can become degenerate when:
+- Both parents become the same commit (after ancestor pruning)
+- One parent becomes an ancestor of the other
+
+**Solution**: Detect and prune degenerate merges, but preserve intentional degenerate merges (like `--no-ff` merges that started degenerate).
+
+<Warning>
+Only merge commits that **become** degenerate due to filtering are pruned. Merges that were already degenerate (indicating they may have been intentional) are preserved.
+</Warning>
+
+### 12. Speed
+
+**Problem**: git filter-branch is [extremely to unusably slow](https://public-inbox.org/git/CABPp-BGOz8nks0+Tdw5GyGqxeYR-3FF6FT5JcgVqZDYVRQ6qog@mail.gmail.com/) for non-trivial repositories.
+
+**Solution**: Use the fast-export/fast-import pipeline for maximum performance.
+
+<Info>
+git-filter-repo is **multiple orders of magnitude faster** than git filter-branch. Operations that took hours with filter-branch often complete in minutes with filter-repo.
+</Info>
+
+See [How It Works](/concepts/how-it-works) for details on why the architecture is fast.
+
+## Comparison with Other Tools
+
+### vs. git filter-branch
+
+<Warning>
+The Git project recommends **against** using git filter-branch and suggests git-filter-repo instead:
+https://git-scm.com/docs/git-filter-branch#_warning
+</Warning>
+
+- **Speed**: filter-branch is multiple orders of magnitude slower
+- **Safety**: filter-branch has many gotchas that can silently corrupt history
+- **Usability**: filter-branch is very onerous to use for non-trivial rewrites
+- **Maintenance**: Git project says filter-branch issues cannot be backward-compatibly fixed
+
+### vs. BFG Repo Cleaner
+
+- **Scope**: BFG is limited to a few kinds of rewrites
+- **Architecture**: BFG's architecture is not amenable to handling more types of rewrites
+- **Bugs**: BFG has shortcomings and bugs even for its intended use case
+- **Extensibility**: BFG cannot be extended with custom logic
+
+<Note>
+For BFG users, there's `bfg-ish`, a reimplementation of BFG based on filter-repo with several new features and bugfixes. See the `contrib/filter-repo-demos/` directory.
+</Note>
+
+### vs. Manual fast-export/fast-import
+
+- **Complexity**: Manual stream editing is error-prone
+- **Corruption risk**: Regex replacements on the stream can corrupt commit messages or file contents
+- **Empty commits**: No way to prune empty commits
+- **Commit references**: No way to update commit message references
+- **Character encoding**: Often breaks with non-ASCII filenames
+
+## Design Philosophy Summary
+
+git-filter-repo was designed to be:
+
+1. **Safe**: Require fresh clones, validate state, provide clear errors
+2. **Fast**: Use optimal architecture, minimal overhead
+3. **Powerful**: Handle all types of history rewriting
+4. **User-friendly**: Good defaults, helpful analysis, clear documentation
+5. **Extensible**: Python callbacks and library usage
+6. **Correct**: Handle edge cases properly (empty commits, degenerate merges, etc.)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="How It Works" icon="gear" href="/concepts/how-it-works">
+    Understand the fast-export | filter | fast-import pipeline
+  </Card>
+  <Card title="Fresh Clone Requirements" icon="clone" href="/concepts/fresh-clone">
+    Learn why fresh clones are required and how to override
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Start using git-filter-repo with practical examples
+  </Card>
+  <Card title="Use Cases" icon="list-check" href="/use-cases/removing-sensitive-data">
+    See real-world examples of history rewriting
+  </Card>
+</CardGroup>

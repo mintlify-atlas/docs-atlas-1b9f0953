@@ -1,0 +1,539 @@
+---
+title: 'Library Usage'
+description: 'Use git-filter-repo as a Python library for programmatic filtering'
+---
+
+## Overview
+
+git-filter-repo can be imported as a Python library, giving you complete programmatic control over repository filtering. This is useful for building custom filtering tools or integrating filtering into larger workflows.
+
+<Warning>
+**API Backward Compatibility**
+
+The git-filter-repo API is **NOT guaranteed to be stable**. APIs may change between versions. For production use:
+
+1. Pin to a specific git-filter-repo version
+2. Test thoroughly after any upgrade
+3. Contribute test cases for APIs you rely on (see `t9391-lib-usage.sh`)
+
+Since repository filtering is typically a one-shot operation, version pinning is usually sufficient.
+</Warning>
+
+## Installation
+
+### Make Module Available
+
+Create a symlink so Python can import it:
+
+```bash
+# Option 1: Symlink in same directory
+ln -s /path/to/git-filter-repo git_filter_repo.py
+
+# Option 2: Add to PYTHONPATH
+export PYTHONPATH=/path/to/git-filter-repo:$PYTHONPATH
+
+# Option 3: Install system-wide (if installed via package manager)
+# Already available as git_filter_repo
+```
+
+### Basic Import
+
+```python
+#!/usr/bin/env python3
+
+import git_filter_repo as fr
+```
+
+## Simple Examples
+
+### Barebones Example
+
+Minimal working example that behaves like running git-filter-repo:
+
+```python
+#!/usr/bin/env python3
+
+import sys
+import git_filter_repo as fr
+
+# Parse command-line arguments
+args = fr.FilteringOptions.parse_args(sys.argv[1:])
+
+# Run analysis or filtering
+if args.analyze:
+    fr.RepoAnalyze.run(args)
+else:
+    filter = fr.RepoFilter(args)
+    filter.run()
+```
+
+Usage:
+```bash
+./barebones.py --path src/ --path-rename src/:lib/
+```
+
+### Custom Filtering Script
+
+A script that filters without command-line args:
+
+```python
+#!/usr/bin/env python3
+
+import git_filter_repo as fr
+
+# Create filtering options programmatically
+args = fr.FilteringOptions.parse_args([
+    '--path', 'src/',
+    '--path', 'docs/',
+    '--invert-paths'
+])
+
+# Run the filter
+filter = fr.RepoFilter(args)
+filter.run()
+```
+
+## Using Callbacks
+
+### Blob Callback Example
+
+Lint all non-binary files in history:
+
+```python
+#!/usr/bin/env python3
+
+import subprocess
+import git_filter_repo as fr
+
+def lint_blobs(blob, metadata):
+    """Run linter on all text files"""
+    # Skip binary files
+    if b"\0" in blob.data[0:8192]:
+        return
+    
+    # Write to temp file
+    filename = '.git/info/tmpfile'
+    with open(filename, 'wb') as f:
+        f.write(blob.data)
+    
+    # Run linter (e.g., prettier, black, etc.)
+    try:
+        subprocess.check_call(['prettier', '--write', filename])
+    except subprocess.CalledProcessError:
+        pass  # Linter might fail on some files
+    
+    # Read modified content
+    with open(filename, 'rb') as f:
+        blob.data = f.read()
+
+# Set up filtering with callback
+args = fr.FilteringOptions.parse_args([], error_on_empty=False)
+args.force = True
+
+filter = fr.RepoFilter(args, blob_callback=lint_blobs)
+filter.run()
+```
+
+### Commit Callback Example
+
+Add files to root commits:
+
+```python
+#!/usr/bin/env python3
+
+import subprocess
+import os
+import git_filter_repo as fr
+
+def add_license_to_root(commit, metadata):
+    """Add LICENSE file to root commit(s)"""
+    if len(commit.parents) == 0:
+        # Hash the LICENSE file
+        license_hash = subprocess.check_output(
+            ['git', 'hash-object', '-w', 'LICENSE']
+        ).strip()
+        
+        license_mode = b'100644'
+        
+        # Add file change
+        commit.file_changes.append(
+            fr.FileChange(b'M', b'LICENSE', license_hash, license_mode)
+        )
+
+args = fr.FilteringOptions.parse_args([
+    '--force',
+    '--preserve-commit-encoding',
+    '--replace-refs', 'update-no-add'
+])
+
+filter = fr.RepoFilter(args, commit_callback=add_license_to_root)
+filter.run()
+```
+
+## Working with Filter Objects
+
+### Creating Git Objects
+
+```python
+import git_filter_repo as fr
+
+# Create a blob
+blob = fr.Blob(b'File contents here')
+print(f"Blob ID: {blob.id}")
+
+# Create a file change
+change = fr.FileChange(
+    b'M',                    # type: M (modify/add), D (delete)
+    b'path/to/file.txt',     # filename
+    blob.id,                 # blob_id
+    b'100644'                # mode
+)
+
+# Create a commit
+commit = fr.Commit(
+    branch=b'refs/heads/main',
+    author_name=b'Jane Doe',
+    author_email=b'jane@example.com',
+    author_date=b'1234567890 +0000',
+    committer_name=b'Jane Doe',
+    committer_email=b'jane@example.com',
+    committer_date=b'1234567890 +0000',
+    message=b'Initial commit',
+    file_changes=[change],
+    parents=[]
+)
+
+# Create a tag
+tag = fr.Tag(
+    ref=b'v1.0.0',
+    from_ref=commit.id,
+    tagger_name=b'Jane Doe',
+    tagger_email=b'jane@example.com',
+    tagger_date=b'1234567890 +0000',
+    tag_msg=b'Release version 1.0.0'
+)
+
+# Create a reset (branch creation/update)
+reset = fr.Reset(b'refs/heads/feature', from_ref=commit.id)
+```
+
+### Inserting Objects
+
+```python
+def my_commit_callback(commit, metadata):
+    # Create and insert a new blob
+    new_blob = fr.Blob(b'New file contents')
+    filter.insert(new_blob)
+    
+    # Add the blob to this commit
+    commit.file_changes.append(
+        fr.FileChange(b'M', b'newfile.txt', new_blob.id, b'100644')
+    )
+
+args = fr.FilteringOptions.parse_args([], error_on_empty=False)
+filter = fr.RepoFilter(args, commit_callback=my_commit_callback)
+filter.run()
+```
+
+## Advanced Examples
+
+### Lint History Script
+
+Run a linting program on all files (based on contrib/filter-repo-demos/lint-history):
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+import os
+import subprocess
+import tempfile
+import git_filter_repo as fr
+
+parser = argparse.ArgumentParser(description='Lint files in history')
+parser.add_argument('--relevant', help='Python code to filter relevant files')
+parser.add_argument('command', nargs='+', help='Lint command')
+args = parser.parse_args()
+
+# Define relevance check
+if args.relevant:
+    exec(f'def is_relevant(filename):\n  {args.relevant}', globals())
+else:
+    def is_relevant(filename):
+        return not b"\0" in filename  # All text files
+
+blobs_handled = {}
+tmpdir = tempfile.mkdtemp().encode()
+
+# Start git cat-file process
+cat_file = subprocess.Popen(
+    ['git', 'cat-file', '--batch'],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE
+)
+
+def lint_with_filenames(commit, metadata):
+    for change in commit.file_changes:
+        if change.blob_id in blobs_handled:
+            change.blob_id = blobs_handled[change.blob_id]
+        elif change.type == b'D':
+            continue
+        elif not is_relevant(change.filename):
+            continue
+        else:
+            # Get blob contents
+            cat_file.stdin.write(change.blob_id + b'\n')
+            cat_file.stdin.flush()
+            objhash, objtype, objsize = cat_file.stdout.readline().split()
+            contents = cat_file.stdout.read(int(objsize) + 1)[:-1]
+            
+            # Write to file
+            filepath = os.path.join(tmpdir, os.path.basename(change.filename))
+            with open(filepath, 'wb') as f:
+                f.write(contents)
+            
+            # Run linter
+            subprocess.check_call(args.command + [filepath.decode('utf-8')])
+            
+            # Read modified contents
+            with open(filepath, 'rb') as f:
+                new_blob = fr.Blob(f.read())
+            
+            filter.insert(new_blob)
+            os.remove(filepath)
+            
+            blobs_handled[change.blob_id] = new_blob.id
+            change.blob_id = new_blob.id
+
+fr_args = fr.FilteringOptions.parse_args([], error_on_empty=False)
+fr_args.force = True
+
+filter = fr.RepoFilter(fr_args, commit_callback=lint_with_filenames)
+filter.run()
+
+cat_file.stdin.close()
+cat_file.wait()
+```
+
+Usage:
+```bash
+./lint-history.py --relevant 'return filename.endswith(b".js")' eslint --fix
+```
+
+### Repository Analysis
+
+Analyze a repository programmatically:
+
+```python
+#!/usr/bin/env python3
+
+import git_filter_repo as fr
+
+# Run analysis
+args = fr.FilteringOptions.parse_args(['--analyze', '--force'])
+fr.RepoAnalyze.run(args)
+
+# Read results
+import os
+analysis_dir = '.git/filter-repo/analysis'
+
+with open(os.path.join(analysis_dir, 'path-all-sizes.txt'), 'rb') as f:
+    print("Largest files:")
+    for line in f.readlines()[2:12]:  # Skip header, show top 10
+        print(line.decode('utf-8').strip())
+```
+
+### Custom Filter Tool
+
+Build a specialized filtering tool:
+
+```python
+#!/usr/bin/env python3
+"""Remove all files larger than a threshold, with nice progress"""
+
+import argparse
+import git_filter_repo as fr
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--max-size', type=int, default=1048576,
+                    help='Maximum file size in bytes')
+args = parser.parse_args()
+
+removed_count = 0
+
+def remove_large_blobs(blob, metadata):
+    global removed_count
+    if len(blob.data) > args.max_size:
+        removed_count += 1
+        print(f"Removing blob {blob.original_id.decode()}: "
+              f"{len(blob.data)} bytes")
+        blob.skip()
+
+fr_args = fr.FilteringOptions.parse_args(['--force'], error_on_empty=False)
+filter = fr.RepoFilter(fr_args, blob_callback=remove_large_blobs)
+filter.run()
+
+print(f"\nRemoved {removed_count} large blobs")
+```
+
+## Available Classes
+
+Key classes exported by git_filter_repo:
+
+### Data Classes
+
+- **Blob** - File contents
+  - Properties: `id`, `original_id`, `data`
+  - Methods: `skip()`, `dump(file)`
+
+- **Commit** - Commit object
+  - Properties: `id`, `original_id`, `branch`, `author_name`, `author_email`, `author_date`, `committer_name`, `committer_email`, `committer_date`, `message`, `parents`, `file_changes`
+  - Methods: `skip(new_id)`, `dump(file)`, `first_parent()`
+
+- **FileChange** - File modification
+  - Properties: `type`, `filename`, `mode`, `blob_id`
+  - Methods: `dump(file)`
+
+- **Tag** - Annotated tag
+  - Properties: `id`, `original_id`, `ref`, `from_ref`, `tagger_name`, `tagger_email`, `tagger_date`, `message`
+  - Methods: `skip()`, `dump(file)`
+
+- **Reset** - Branch creation/update
+  - Properties: `ref`, `from_ref`
+  - Methods: `dump(file)`
+
+### Parser and Filter Classes
+
+- **FilteringOptions** - Parse and store filtering options
+  - Static method: `parse_args(args, error_on_empty=True)`
+
+- **RepoFilter** - Main filtering engine
+  - Constructor: `RepoFilter(args, **callbacks)`
+  - Methods: `run()`, `insert(obj)`
+  - Callbacks: `blob_callback`, `commit_callback`, `tag_callback`, `reset_callback`
+
+- **FastExportParser** - Low-level parser
+  - Constructor: `FastExportParser(**callbacks)`
+  - Methods: `run()`, `parse_stream(input, output)`
+
+- **RepoAnalyze** - Repository analysis
+  - Static methods: `run(args)`, `gather_data(args)`, `write_report(reportdir, stats)`
+
+### Utility Functions
+
+- **string_to_date(datestring)** - Parse git date format
+- **date_to_string(dateobj)** - Convert to git date format
+- **GitUtils** - Various git utilities
+
+## Callback Reference
+
+All callbacks available when creating `RepoFilter`:
+
+```python
+filter = fr.RepoFilter(
+    args,
+    blob_callback=my_blob_func,        # (blob, metadata) -> None
+    commit_callback=my_commit_func,    # (commit, metadata) -> None
+    tag_callback=my_tag_func,          # (tag) -> None
+    reset_callback=my_reset_func,      # (reset) -> None
+)
+```
+
+The `metadata` dict contains:
+- `orig_parents` - Original parent commit IDs
+- `had_file_changes` - Whether commit originally had file changes
+
+## Best Practices
+
+<Tip>
+**Error Handling**
+
+```python
+try:
+    filter = fr.RepoFilter(args, commit_callback=my_callback)
+    filter.run()
+except Exception as e:
+    print(f"Filtering failed: {e}")
+    # Clean up, log error, etc.
+    raise
+```
+</Tip>
+
+<Tip>
+**Testing**
+
+Test your filter on a small repository first:
+
+```python
+import tempfile
+import shutil
+
+# Create test repo
+test_repo = tempfile.mkdtemp()
+try:
+    # Initialize and populate test repo
+    # ...
+    
+    # Run filter
+    os.chdir(test_repo)
+    filter = fr.RepoFilter(args, ...)
+    filter.run()
+    
+    # Verify results
+    # ...
+finally:
+    shutil.rmtree(test_repo)
+```
+</Tip>
+
+<Warning>
+**Thread Safety**
+
+RepoFilter is NOT thread-safe. Don't run multiple filters on the same repository simultaneously.
+</Warning>
+
+## Real-World Examples
+
+Check out these production-quality examples in `contrib/filter-repo-demos/`:
+
+- **lint-history** - Run linters on historical files
+- **insert-beginning** - Add files to root commits
+- **bfg-ish** - BFG Repo Cleaner reimplementation
+- **filter-lamely** - git filter-branch reimplementation
+- **clean-ignore** - Remove ignored files from history
+
+These demonstrate:
+- Complex callback logic
+- Error handling
+- Performance optimization
+- User interaction
+- Integration with external tools
+
+## Migration from git filter-branch
+
+If migrating from filter-branch:
+
+```python
+# Old filter-branch:
+# git filter-branch --tree-filter 'rm -f passwords.txt' HEAD
+
+# New filter-repo equivalent:
+import git_filter_repo as fr
+
+args = fr.FilteringOptions.parse_args([
+    '--invert-paths',
+    '--path', 'passwords.txt'
+])
+
+filter = fr.RepoFilter(args)
+filter.run()
+```
+
+See `contrib/filter-repo-demos/filter-lamely` for a complete filter-branch replacement.
+
+## Next Steps
+
+- Review [Advanced Filtering](/guides/advanced-filtering) for callback patterns
+- Study example scripts in `contrib/filter-repo-demos/`
+- Read the [git-filter-repo source code](https://github.com/newren/git-filter-repo)
+- Check test cases in `t/t9391-lib-usage.sh`

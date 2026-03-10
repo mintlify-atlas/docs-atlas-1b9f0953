@@ -1,0 +1,315 @@
+---
+title: 'Basic Filtering'
+description: 'Learn fundamental filtering operations with git-filter-repo'
+---
+
+## Overview
+
+Basic filtering operations allow you to clean up your repository by removing unwanted files, extracting specific paths, or restructuring your project layout. These are the most common use cases for git-filter-repo.
+
+## Path-Based Filtering
+
+### Keep Specific Files or Directories
+
+To keep only specific paths in your repository history:
+
+<CodeGroup>
+```bash Single File
+git filter-repo --path README.md
+```
+
+```bash Multiple Paths
+git filter-repo --path README.md --path docs/ --path src/core/
+```
+
+```bash With Trailing Slash
+# Both work - directory names can include or omit trailing slash
+git filter-repo --path guides/ --path tools/releases
+```
+</CodeGroup>
+
+<Note>
+All file paths are relative to the repository root.
+</Note>
+
+### Remove Specific Files
+
+Use `--invert-paths` to keep everything *except* the specified paths:
+
+```bash
+git filter-repo --path secrets.txt --path config/passwords.yml --invert-paths
+```
+
+This removes `secrets.txt` and `config/passwords.yml` from all history.
+
+### Combining Include and Exclude
+
+Run filter-repo multiple times to combine inclusion and exclusion filters:
+
+```bash
+# First, keep only src/main/
+git filter-repo --path src/main/
+
+# Then, exclude test data files
+git filter-repo --path-glob 'src/*/test-data' --invert-paths
+```
+
+## Pattern Matching
+
+### Glob Patterns
+
+Use glob patterns for flexible matching:
+
+<CodeGroup>
+```bash Extension Match
+# Keep all Python files
+git filter-repo --path-glob '*.py'
+```
+
+```bash Directory Pattern
+# Keep all markdown files in any docs directory
+git filter-repo --path-glob 'docs/**/*.md'
+```
+
+```bash Multiple Patterns
+git filter-repo --path-glob '*.js' --path-glob '*.ts' --path-glob '*.jsx'
+```
+</CodeGroup>
+
+<Warning>
+Quote glob patterns to prevent shell expansion.
+</Warning>
+
+### Regular Expressions
+
+For more complex matching, use regex patterns:
+
+```bash
+# Keep only files with YYYY-MM-DD.txt format at least 2 directories deep
+git filter-repo --path-regex '^.*/.*/[0-9]{4}-[0-9]{2}-[0-9]{2}\.txt$'
+```
+
+See [Python regex syntax](https://docs.python.org/3/library/re.html#regular-expression-syntax) for details.
+
+### Base Name Matching
+
+Match on filename only (not full path):
+
+```bash
+# Keep all README.md and Makefile files anywhere in the repository
+git filter-repo --use-base-name --path README.md --path Makefile
+```
+
+<Note>
+`--use-base-name` is incompatible with `--path-rename` and directory matching.
+</Note>
+
+## Subdirectory Operations
+
+### Extract Subdirectory as Root
+
+Make a subdirectory the new repository root:
+
+<Tabs>
+  <Tab title="Before">
+    ```
+    project/
+      module/
+        foo.c
+        bar.c
+      other/
+        data.txt
+      README.md
+    ```
+  </Tab>
+  <Tab title="Command">
+    ```bash
+    git filter-repo --subdirectory-filter module/
+    ```
+  </Tab>
+  <Tab title="After">
+    ```
+    foo.c
+    bar.c
+    ```
+  </Tab>
+</Tabs>
+
+This is equivalent to:
+```bash
+git filter-repo --path module/ --path-rename module/:
+```
+
+### Move Everything to Subdirectory
+
+Place all repository contents under a new directory:
+
+<Tabs>
+  <Tab title="Before">
+    ```
+    src/
+      main.c
+    README.md
+    ```
+  </Tab>
+  <Tab title="Command">
+    ```bash
+    git filter-repo --to-subdirectory-filter my-module/
+    ```
+  </Tab>
+  <Tab title="After">
+    ```
+    my-module/
+      src/
+        main.c
+      README.md
+    ```
+  </Tab>
+</Tabs>
+
+This is useful when preparing to merge repositories.
+
+## Path Shortcuts
+
+### Paths from File
+
+For extensive filtering, list all paths in a file:
+
+<CodeGroup>
+```text paths.txt
+# Comments and blank lines are ignored
+README.md
+docs/
+src/core/
+
+# Glob pattern
+glob:*.py
+
+# Regex pattern
+regex:^tests/.*test_.*\.py$
+
+# Path rename
+old-name/==>new-name/
+```
+
+```bash Usage
+git filter-repo --paths-from-file paths.txt
+```
+</CodeGroup>
+
+Prefix lines with:
+- `literal:` (default) for exact matches
+- `glob:` for glob patterns
+- `regex:` for regular expressions
+- Use `==>` to specify renames
+
+### Generate Paths from Current Files
+
+Keep only currently tracked files (delete historical files):
+
+```bash
+git ls-files >../keep-files.txt
+git filter-repo --paths-from-file ../keep-files.txt
+```
+
+## Analysis Before Filtering
+
+Analyze your repository to help decide what to filter:
+
+```bash
+git filter-repo --analyze
+```
+
+This creates reports in `.git/filter-repo/analysis/`:
+
+- **blob-shas-and-paths.txt** - Files by size
+- **path-deleted-sizes.txt** - Previously deleted large files
+- **extensions-all-sizes.txt** - Size by file extension
+- **directories-all-sizes.txt** - Size by directory
+- **renames.txt** - File rename history
+
+<Tip>
+Run `--analyze` both before and after filtering to verify results.
+</Tip>
+
+## Common Examples
+
+### Remove Large Files
+
+```bash
+# Analyze to find large files
+git filter-repo --analyze
+
+# Review .git/filter-repo/analysis/path-all-sizes.txt
+# Then remove specific large files
+git filter-repo --invert-paths \
+  --path large-dataset.zip \
+  --path videos/presentation.mp4
+```
+
+### Extract Specific Modules
+
+```bash
+# Extract just the API module
+git filter-repo --path api/ --path docs/api/
+```
+
+### Clean Up .DS_Store Files
+
+<Tabs>
+  <Tab title="Option 1: Base Name">
+    ```bash
+    git filter-repo --invert-paths \
+      --path '.DS_Store' \
+      --use-base-name
+    ```
+  </Tab>
+  <Tab title="Option 2: Glob">
+    ```bash
+    git filter-repo --invert-paths \
+      --path-glob '*/.DS_Store' \
+      --path '.DS_Store'
+    ```
+  </Tab>
+</Tabs>
+
+## Important Notes
+
+<Warning>
+**Fresh Clone Required**
+
+Always work in a fresh clone:
+```bash
+git clone --no-local /path/to/repo repo-to-filter
+cd repo-to-filter
+git filter-repo ...
+```
+
+Use `--force` to override the fresh clone check only if you're certain.
+</Warning>
+
+<Note>
+**Renames Are Not Followed**
+
+If a file was renamed, specify both old and new paths:
+```bash
+git filter-repo --path oldname/ --path newname/
+```
+</Note>
+
+<Tip>
+**Sequential Filtering**
+
+You can run filter-repo multiple times in sequence for complex filtering:
+```bash
+git filter-repo --path src/
+git filter-repo --path-glob 'tests/*' --invert-paths
+git filter-repo --path-rename src/:lib/
+```
+</Tip>
+
+## Next Steps
+
+- Learn about [Path Renaming](/guides/path-based-filtering) for restructuring
+- Explore [Content Filtering](/guides/content-based-filtering) for text replacement
+- See [Advanced Filtering](/guides/advanced-filtering) for complex operations

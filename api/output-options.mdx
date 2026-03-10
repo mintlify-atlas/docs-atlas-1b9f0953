@@ -1,0 +1,446 @@
+---
+title: 'Output and Control Options'
+description: 'Options for controlling where filtering occurs, output behavior, and operational modes'
+---
+
+# Output and Control Options
+
+Options that control where git-filter-repo reads from and writes to, plus general operational controls.
+
+## Location Options
+
+### --source
+
+<ParamField path="--source" type="string">
+  Git repository to read from.
+  
+  **Type:** Path to git repository
+  
+  **Default:** Current directory (`.`)
+  
+  **Effect:** Implies `--partial`
+  
+  Specifies a different repository to read history from. When used with `--target`, allows filtering from one repository into another without mixing old and new history.
+  
+  **Example:**
+  ```bash
+  git filter-repo --source /path/to/source-repo --target /path/to/new-repo
+  ```
+  
+  <Note>
+  Using `--source` automatically enables `--partial` mode.
+  </Note>
+</ParamField>
+
+### --target
+
+<ParamField path="--target" type="string">
+  Git repository to overwrite with filtered history.
+  
+  **Type:** Path to git repository
+  
+  **Default:** Current directory (`.`)
+  
+  **Effect:** Implies `--partial`
+  
+  Specifies a different repository to write filtered history to. The target repository will be overwritten with the filtered history.
+  
+  **Example:**
+  ```bash
+  git filter-repo --source ./old-repo --target ./new-repo --path src/
+  ```
+  
+  <Warning>
+  The target repository will be completely overwritten. Make sure you have backups.
+  </Warning>
+</ParamField>
+
+## Operational Mode Options
+
+### --force, -f
+
+<ParamField path="--force" type="boolean" default="false">
+  Bypass fresh clone checks and rewrite history anyway.
+  
+  **Aliases:** `-f`
+  
+  **Warning:** History rewriting is IRREVERSIBLE
+  
+  By default, git-filter-repo checks if the repository is a fresh clone to prevent accidental data loss. This flag bypasses those safety checks.
+  
+  **When to use:**
+  - You're certain you have backups
+  - Repository fails fresh clone checks but you want to proceed anyway
+  - You're running git-filter-repo multiple times on the same repo
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --force
+  ```
+  
+  <Warning>
+  **DO NOT** use `--force` habitually. Always work in a fresh clone when possible. If you need `--force`, make absolutely sure you have backups.
+  </Warning>
+</ParamField>
+
+### --partial
+
+<ParamField path="--partial" type="boolean" default="false">
+  Perform partial history rewrite, mixing old and new history.
+  
+  **Effects:**
+  - Disables `refs/remotes/origin/*` → `refs/heads/*` migration
+  - Disables removal of `origin` remote
+  - Disables removal of unexported refs
+  - Disables reflog expiration
+  - Disables automatic `git gc`
+  - Changes `--tag-rename` and `--refname-callback` to create new refs instead of replacing
+  
+  **Automatically enabled by:**
+  - `--source`
+  - `--target`
+  - `--refs`
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --partial
+  ```
+  
+  <Warning>
+  Partial rewrites mix old and new history. Use with caution as this can lead to confusion.
+  </Warning>
+</ParamField>
+
+### --refs
+
+<ParamField path="--refs" type="string[]">
+  Limit history rewriting to specified refs.
+  
+  **Type:** One or more ref specifications
+  
+  **Effect:** Implies `--partial`
+  
+  **Format:** Same as `git fast-export` (ref names, ranges, globs)
+  
+  Only the specified refs will be rewritten. All other refs remain unchanged.
+  
+  **Examples:**
+  ```bash
+  # Rewrite only main branch
+  git filter-repo --refs refs/heads/main
+  
+  # Rewrite specific branches
+  git filter-repo --refs refs/heads/feature-1 refs/heads/feature-2
+  
+  # Rewrite all feature branches
+  git filter-repo --refs 'refs/heads/feature-*'
+  
+  # Rewrite range
+  git filter-repo --refs main~10..main
+  ```
+  
+  <Note>
+  This can cause issues with degenerate merge pruning when negative revisions are specified.
+  </Note>
+</ParamField>
+
+### --dry-run
+
+<ParamField path="--dry-run" type="boolean" default="false">
+  Preview changes without modifying the repository.
+  
+  **Effects:**
+  - Runs `git fast-export` and filters output
+  - Saves original export to `.git/filter-repo/fast-export.original`
+  - Saves filtered export to `.git/filter-repo/fast-export.filtered`
+  - Does NOT modify repository
+  - Does NOT run `git fast-import`
+  - Disables commit message hash rewriting (new hashes unknown)
+  - Disables some empty commit filtering (can't query fast-import)
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --dry-run
+  
+  # Review the filtered output
+  cat .git/filter-repo/fast-export.filtered
+  ```
+  
+  <Tip>
+  Always test with `--dry-run` first for complex operations.
+  </Tip>
+</ParamField>
+
+### --debug
+
+<ParamField path="--debug" type="boolean" default="false">
+  Show additional debugging information.
+  
+  **Output includes:**
+  - Commands being run
+  - File locations for input/output
+  - Processing steps
+  - Extra operational details
+  
+  **With `--dry-run`:** Shows what WOULD be run
+  
+  **Without `--dry-run`:** Shows what IS being run
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --debug
+  ```
+</ParamField>
+
+## Input Options
+
+### --stdin
+
+<ParamField path="--stdin" type="boolean" default="false">
+  Read fast-export stream from stdin instead of running git fast-export.
+  
+  **Requirements:**
+  - Input must be in expected fast-export format
+  - Must include `original-oid` directives
+  
+  **Use cases:**
+  - Custom pre-processing of export stream
+  - Combining multiple export streams
+  - Testing with pre-generated exports
+  
+  **Example:**
+  ```bash
+  # Generate export separately
+  git fast-export --show-original-ids --all > export.dat
+  
+  # Filter it
+  cat export.dat | git filter-repo --stdin
+  ```
+</ParamField>
+
+## Sensitive Data Removal
+
+### --sensitive-data-removal, --sdr
+
+<ParamField path="--sensitive-data-removal" type="boolean" default="false">
+  Enable sensitive data removal mode.
+  
+  **Aliases:** `--sdr`
+  
+  **Additional actions:**
+  - Fetches all refs from origin (unless `--no-fetch`)
+  - Tracks and reports first changed commits
+  - Tracks orphaned LFS objects
+  - Provides detailed cleanup instructions
+  
+  **Example:**
+  ```bash
+  git filter-repo --replace-text secrets.txt --sensitive-data-removal
+  ```
+  
+  <Warning>
+  May discard local-only changes during fetch. Use `--no-fetch` if you have unpushed changes.
+  </Warning>
+</ParamField>
+
+### --no-fetch
+
+<ParamField path="--no-fetch" type="boolean" default="false">
+  Skip the automatic fetch when using `--sensitive-data-removal`.
+  
+  **Effect:** Prevents overwriting local-only changes
+  
+  **Risk:** May leave sensitive data in unfetched refs
+  
+  **Automatically enabled by:** `--partial` or any flag implying `--partial`
+  
+  **Example:**
+  ```bash
+  git filter-repo --sdr --no-fetch --replace-text secrets.txt
+  ```
+</ParamField>
+
+## Output Control
+
+### --quiet
+
+<ParamField path="--quiet" type="boolean" default="false">
+  Suppress progress output and pass `--quiet` to git commands.
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --quiet
+  ```
+</ParamField>
+
+### --no-gc
+
+<ParamField path="--no-gc" type="boolean" default="false">
+  Skip running `git gc` after filtering.
+  
+  **Default behavior:** Runs `git gc --aggressive` after filtering
+  
+  **Use `--no-gc` when:**
+  - You'll run multiple filter-repo commands
+  - You want to run gc manually later
+  - You're doing partial filtering
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --no-gc
+  ```
+</ParamField>
+
+## Ordering Options
+
+### --date-order
+
+<ParamField path="--date-order" type="boolean" default="false">
+  Process commits in commit timestamp order.
+  
+  **Default:** Topological order (parents before children)
+  
+  **Effect:** Processes commits by author/commit date instead
+  
+  **Example:**
+  ```bash
+  git filter-repo --date-order
+  ```
+</ParamField>
+
+## Utility Options
+
+### --help, -h
+
+<ParamField path="--help" type="boolean">
+  Show help message and exit.
+  
+  **Aliases:** `-h`
+  
+  **Example:**
+  ```bash
+  git filter-repo --help
+  ```
+</ParamField>
+
+### --version
+
+<ParamField path="--version" type="boolean">
+  Display git-filter-repo version and exit.
+  
+  **Example:**
+  ```bash
+  git filter-repo --version
+  ```
+</ParamField>
+
+### --analyze
+
+<ParamField path="--analyze" type="boolean" default="false">
+  Analyze repository without modifying it.
+  
+  **Output:** Creates reports in `.git/filter-repo/analysis/`
+  
+  **Reports include:**
+  - Blob sizes by path/extension
+  - Path renames over time
+  - Large objects
+  - Directory statistics
+  
+  **Example:**
+  ```bash
+  git filter-repo --analyze
+  ls .git/filter-repo/analysis/
+  ```
+  
+  [Learn more about analysis →](/use-cases/analyzing-repository)
+</ParamField>
+
+## Usage Examples
+
+### Filter Between Repositories
+
+```bash
+# Filter from source to new clean repository
+git filter-repo \
+  --source ./messy-repo \
+  --target ./clean-repo \
+  --path important-code/
+```
+
+### Dry Run Before Real Filtering
+
+```bash
+# Test first
+git filter-repo --path src/ --dry-run
+
+# Review output
+less .git/filter-repo/fast-export.filtered
+
+# If looks good, run for real
+git filter-repo --path src/
+```
+
+### Multiple Sequential Filters
+
+```bash
+# Run multiple filters, skip gc until done
+git filter-repo --path src/ --no-gc
+git filter-repo --replace-text secrets.txt --no-gc
+git filter-repo --strip-blobs-bigger-than 10M --no-gc
+
+# Now run gc once at end
+git gc --aggressive
+```
+
+### Sensitive Data Removal
+
+```bash
+# Remove sensitive data with full cleanup
+git filter-repo \
+  --replace-text secrets.txt \
+  --sensitive-data-removal
+
+# Check generated reports
+cat .git/filter-repo/first-changed-commits
+cat .git/filter-repo/orphaned_lfs_objects
+```
+
+### Partial History Rewrite
+
+```bash
+# Rewrite only specific branches
+git filter-repo \
+  --refs refs/heads/feature-1 refs/heads/feature-2 \
+  --path src/
+```
+
+## Important Notes
+
+<Warning>
+**Fresh Clone Requirement**
+
+git-filter-repo expects to run on a fresh clone. Use `--force` to override this check, but ONLY if you have backups.
+</Warning>
+
+<Note>
+**Mixing Old and New History**
+
+`--partial` mode mixes old and new history. This is usually not what you want for a clean history rewrite.
+</Note>
+
+<Tip>
+**Always Test First**
+
+Use `--dry-run` and `--debug` for complex operations:
+```bash
+git filter-repo --path src/ --dry-run --debug
+```
+</Tip>
+
+## See Also
+
+- [CLI Overview →](/api/cli-overview) - All command options
+- [Path Options →](/api/path-options) - Filter by path
+- [Content Options →](/api/content-options) - Modify content
+- [Examples →](/examples/cheat-sheet) - Real-world usage

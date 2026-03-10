@@ -1,80 +1,342 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with git-filter-repo in minutes
 ---
 
-## Get started in three steps
+## Your First Filtering Operation
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through a complete example of using git-filter-repo to extract a subdirectory from a repository and prepare it for merging into another project.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  git-filter-repo is designed to work on a **fresh clone** for safety. It will refuse to run on a repository with uncommitted changes or unpushed commits unless you use `--force`.
 </Note>
+
+## Example Scenario
+
+Let's say you want to:
+- Extract only the `src/` directory from a repository
+- Move everything into a new `my-module/` subdirectory
+- Rename all tags with a `my-module-` prefix to avoid conflicts
+
+This is a common workflow when splitting a monorepo or preparing code to merge into another project.
+
+<Steps>
+  <Step title="Create a fresh clone">
+    Start with a fresh clone of your repository:
+
+    ```bash
+    git clone https://github.com/yourname/yourrepo.git repo-to-filter
+    cd repo-to-filter
+    ```
+
+    <Warning>
+      Always work on a fresh clone! git-filter-repo rewrites history and removes the remote by default to prevent accidental pushes.
+    </Warning>
+  </Step>
+
+  <Step title="Analyze your repository (optional)">
+    Before filtering, you can analyze your repository to understand its structure:
+
+    ```bash
+    git filter-repo --analyze
+    ```
+
+    This creates a `.git/filter-repo/analysis/` directory containing reports about:
+    - Largest files
+    - Most commits per path
+    - File and directory sizes
+    - Extensions used
+
+    <CodeGroup>
+      ```bash View path analysis
+      cat .git/filter-repo/analysis/path-all-sizes.txt
+      ```
+
+      ```bash View largest blobs
+      cat .git/filter-repo/analysis/blob-shas-and-paths.txt
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Run the filter operation">
+    Now perform the actual filtering with a single command:
+
+    ```bash
+    git filter-repo --path src/ --to-subdirectory-filter my-module --tag-rename '':'my-module-'
+    ```
+
+    Let's break down what each option does:
+
+    <ParamField path="--path src/" type="string">
+      Keep only files under the `src/` directory. Everything else is removed.
+    </ParamField>
+
+    <ParamField path="--to-subdirectory-filter my-module" type="string">
+      Move all remaining files into a new `my-module/` subdirectory. So `src/foo.c` becomes `my-module/src/foo.c`.
+    </ParamField>
+
+    <ParamField path="--tag-rename '':'my-module-'" type="string">
+      Rename all tags by prepending `my-module-` to prevent naming conflicts. The empty string before the colon is the old prefix to replace.
+    </ParamField>
+  </Step>
+
+  <Step title="Verify the results">
+    Check that the filtering worked as expected:
+
+    ```bash
+    # View the file structure
+    ls -la
+
+    # Check git history
+    git log --oneline --graph --all
+
+    # Verify only src/ files remain (now in my-module/src/)
+    git ls-tree -r --name-only HEAD
+
+    # Check renamed tags
+    git tag
+    ```
+
+    <Tip>
+      Notice that commits which only touched files outside `src/` have been completely removed from the history.
+    </Tip>
+  </Step>
+
+  <Step title="Push to a new remote (optional)">
+    If you want to push your filtered repository:
+
+    ```bash
+    # Add new remote (filter-repo removes the old one)
+    git remote add origin https://github.com/yourname/filtered-repo.git
+
+    # Push all branches and tags
+    git push --all origin
+    git push --tags origin
+    ```
+  </Step>
+</Steps>
+
+## How Fast Is It?
+
+One of git-filter-repo's key advantages is speed. For reference:
+
+<CardGroup cols={2}>
+  <Card title="filter-repo" icon="rocket">
+    Minutes for large repos
+  </Card>
+  
+  <Card title="filter-branch" icon="turtle">
+    Hours to days for the same repos
+  </Card>
+</CardGroup>
+
+## Common Quick Operations
+
+Here are more examples you can try:
+
+<AccordionGroup>
+  <Accordion title="Remove a file from all history">
+    Remove a sensitive file that was accidentally committed:
+
+    ```bash
+    git filter-repo --invert-paths --path secrets.txt
+    ```
+
+    The `--invert-paths` flag means "remove" instead of "keep".
+  </Accordion>
+
+  <Accordion title="Extract a subdirectory as the new root">
+    Make a subdirectory the root of the repository:
+
+    ```bash
+    git filter-repo --subdirectory-filter path/to/subdir
+    ```
+
+    Everything in `path/to/subdir` becomes the root, and everything else is removed.
+  </Accordion>
+
+  <Accordion title="Remove files by pattern">
+    Remove all `.log` files from history:
+
+    ```bash
+    git filter-repo --invert-paths --path-glob '*.log'
+    ```
+  </Accordion>
+
+  <Accordion title="Replace text in all files">
+    Replace text across all files in history:
+
+    ```bash
+    git filter-repo --replace-text <(echo 'old-text==>new-text')
+    ```
+
+    Or use a file with multiple replacements:
+
+    ```bash
+    # Create replacements.txt:
+    # literal:password123==>***REMOVED***
+    # regex:API_KEY_[A-Z0-9]+==>[REDACTED]
+
+    git filter-repo --replace-text replacements.txt
+    ```
+  </Accordion>
+
+  <Accordion title="Remove large blobs">
+    First analyze to find large files:
+
+    ```bash
+    git filter-repo --analyze
+    cat .git/filter-repo/analysis/blob-shas-and-paths.txt | head -20
+    ```
+
+    Then remove them:
+
+    ```bash
+    git filter-repo --strip-blobs-bigger-than 10M
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Command Comparison
+
+<Tip>
+  Coming from other tools? Here's how git-filter-repo compares:
+</Tip>
+
+<Tabs>
+  <Tab title="filter-repo">
+    ```bash
+    git filter-repo --path src/ \
+      --to-subdirectory-filter my-module \
+      --tag-rename '':'my-module-'
+    ```
+    
+    **1 simple command**, fast, and handles all edge cases correctly.
+  </Tab>
+
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch \
+      --index-filter 'git ls-files \
+                          | grep -v ^src/ \
+                          | xargs git rm -q --cached;
+                      git ls-files -s \
+                          | sed "s%$(printf \\t)%&my-module/%" \
+                          | git update-index --index-info;
+                      git ls-files \
+                          | grep -v ^my-module/ \
+                          | xargs git rm -q --cached' \
+      --tag-name-filter 'echo "my-module-$(cat)"' \
+      --prune-empty -- --all
+    git clone file://$(pwd) newcopy
+    cd newcopy
+    git for-each-ref --format="delete %(refname)" refs/tags/ \
+      | grep -v refs/tags/my-module- \
+      | git update-ref --stdin
+    git gc --prune=now
+    ```
+    
+    **Multiple commands**, OS-specific syntax, much slower, and has numerous gotchas.
+  </Tab>
+
+  <Tab title="BFG">
+    BFG Repo Cleaner cannot perform this type of operation. It's limited to:
+    - Removing files/folders
+    - Removing large files
+    - Replacing passwords/secrets
+    
+    It cannot handle path renaming or subdirectory extraction.
+  </Tab>
+</Tabs>
+
+## Safety Features
+
+git-filter-repo includes several safety features:
+
+<CardGroup cols={2}>
+  <Card title="Fresh Clone Check" icon="shield">
+    Refuses to run unless in a fresh clone (override with `--force`)
+  </Card>
+  
+  <Card title="Remote Removal" icon="link-slash">
+    Removes git remotes by default to prevent accidental pushes of rewritten history
+  </Card>
+  
+  <Card title="Empty Commit Pruning" icon="broom">
+    Automatically removes commits that become empty after filtering
+  </Card>
+  
+  <Card title="Auto Cleanup" icon="trash">
+    Automatically runs garbage collection to remove old objects
+  </Card>
+</CardGroup>
+
+## What Happened to My Repo?
+
+After running git-filter-repo:
+
+<Steps>
+  <Step title="History is rewritten">
+    All commit hashes change because the repository history has been rewritten. Old commit references are invalid.
+  </Step>
+
+  <Step title="Remotes are removed">
+    The `origin` remote is removed by default. This prevents accidentally pushing rewritten history.
+
+    Add it back if needed:
+    ```bash
+    git remote add origin <url>
+    ```
+  </Step>
+
+  <Step title="Objects are cleaned">
+    Old objects and refs are automatically cleaned up with `git gc`.
+  </Step>
+
+  <Step title="Commits may be removed">
+    Commits that:
+    - Only touched filtered-out paths
+    - Become empty after filtering
+    - Become duplicate merges
+    
+    ...are automatically removed from history.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Common Use Cases" icon="list-check" href="/use-cases/extracting-subdirectory">
+    Explore more filtering scenarios
+  </Card>
+  
+  <Card title="Path-Based Filtering" icon="folder-tree" href="/guides/path-based-filtering">
+    Learn advanced path filtering techniques
+  </Card>
+  
+  <Card title="Command Reference" icon="terminal" href="/api/cli-overview">
+    See all available options
+  </Card>
+  
+  <Card title="Migration Guides" icon="arrow-right-arrow-left" href="/migration/from-filter-branch">
+    Migrate from filter-branch or BFG
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you run into issues:
+
+```bash
+# Quick help
+git filter-repo -h
+
+# Full manual (if installed)
+git filter-repo --help
+
+# Or visit the FAQ
+```
+
+<Card title="FAQ & Troubleshooting" icon="question" href="/resources/faq">
+  Find answers to common questions
+</Card>

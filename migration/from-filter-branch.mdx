@@ -1,0 +1,376 @@
+---
+title: Migrating from filter-branch
+description: Complete guide for converting filter-branch commands to git-filter-repo
+---
+
+This guide is for users familiar with `git filter-branch` who want to migrate to `git-filter-repo`. We'll show you how to convert your existing commands and take advantage of filter-repo's improved performance and safety.
+
+## Quick Reference
+
+filter-branch and filter-repo have different approaches:
+- **filter-branch**: Checks out each commit and runs shell commands on the working copy
+- **filter-repo**: Operates on the fast-export stream with predefined filters and Python callbacks
+
+<Note>
+filter-repo defaults to rewriting **all branches** while filter-branch requires `-- --all` to do so. Use `--refs <rev-list-args>` to limit the scope in filter-repo.
+</Note>
+
+## Half-Hearted Conversions
+
+You can quickly convert any `git filter-branch` command by replacing it with [`filter-lamely`](https://github.com/newren/git-filter-repo/blob/main/contrib/filter-repo-demos/filter-lamely):
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --tree-filter 'rm filename' HEAD
+    ```
+  </Tab>
+  <Tab title="filter-lamely">
+    ```bash
+    filter-lamely --tree-filter 'rm filename' HEAD
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+This approach runs faster but keeps most of filter-branch's drawbacks. For best results, convert to native filter-repo commands as shown below.
+</Warning>
+
+## Basic Differences
+
+### Default Scope
+- **filter-branch**: Operates on specified branches only (requires `-- --all` for everything)
+- **filter-repo**: Rewrites all refs by default (use `--refs` to limit scope)
+
+### Automatic Improvements
+
+filter-repo automatically handles:
+- Rewriting old commit IDs in commit messages
+- Pruning commits that become empty
+- Running garbage collection after filtering
+- Shrinking repository size
+
+## Command Conversions
+
+### Removing a File
+
+The filter-branch manual shows three variations of removing a file:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    # Basic tree filter
+    git filter-branch --tree-filter 'rm filename' HEAD
+    
+    # With error handling
+    git filter-branch --tree-filter 'rm -f filename' HEAD
+    
+    # Fast index filter
+    git filter-branch --index-filter \
+      'git rm --cached --ignore-unmatch filename' HEAD
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    # Single command handles all cases
+    git filter-repo --invert-paths --path filename
+    ```
+  </Tab>
+</Tabs>
+
+### Extracting a Subdirectory
+
+Move a subdirectory to the repository root:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --subdirectory-filter foodir -- --all
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    git filter-repo --subdirectory-filter foodir
+    ```
+  </Tab>
+</Tabs>
+
+### Moving Tree into Subdirectory
+
+Place all files into a new subdirectory:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    # GNU-specific, fails on BSD
+    git filter-branch --index-filter \
+      'git ls-files -s | sed "s-\t\"*-&newsubdir/-" |
+        GIT_INDEX_FILE=$GIT_INDEX_FILE.new \
+          git update-index --index-info &&
+       mv "$GIT_INDEX_FILE.new" "$GIT_INDEX_FILE"' HEAD
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    # Works on all platforms
+    git filter-repo --to-subdirectory-filter newsubdir
+    ```
+  </Tab>
+</Tabs>
+
+### Re-grafting History
+
+Attach history to a different parent commit:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    # Option 1: Limited to single initial commit
+    git filter-branch --parent-filter \
+      'sed "s/^\$/-p <graft-id>/"' HEAD
+    
+    # Option 2: More flexible
+    git filter-branch --parent-filter \
+      'test $GIT_COMMIT = <commit-id> && \
+       echo "-p <graft-id>" || cat' HEAD
+    
+    # Option 3: Using git-replace
+    git replace --graft $commit-id $graft-id
+    git filter-branch $graft-id..HEAD
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    # Same git-replace approach
+    git replace --graft $commit-id $graft-id
+    git filter-repo --proceed
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`--proceed` is required because filter-repo errors if no filtering arguments are specified.
+</Note>
+
+### Removing Commits by Author
+
+<Warning>
+**This is a BAD example for both tools!** It doesn't remove the author's changes, just their commits. The changes get attributed to subsequent authors. Use `git rebase` instead for most use cases. [Learn more about the differences](https://github.com/newren/git-filter-repo/issues/62#issuecomment-597725502).
+</Warning>
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --commit-filter '
+      if [ "$GIT_AUTHOR_NAME" = "Darl McBribe" ];
+      then
+        skip_commit "$@";
+      else
+        git commit-tree "$@";
+      fi' HEAD
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    git filter-repo --commit-callback '
+      if commit.author_name == b"Darl McBribe":
+        commit.skip()
+      '
+    ```
+  </Tab>
+</Tabs>
+
+### Rewriting Commit Messages
+
+#### Removing Text
+
+Remove git-svn-id lines from commit messages:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --msg-filter '
+      sed -e "/^git-svn-id:/d"
+      '
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    git filter-repo --message-callback '
+      return re.sub(b"^git-svn-id:.*\n", b"", 
+                    message, flags=re.MULTILINE)
+      '
+    ```
+  </Tab>
+</Tabs>
+
+#### Adding Text
+
+Add Acked-by lines to the last 10 commits:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --msg-filter '
+      cat &&
+      echo "Acked-by: Bugs Bunny <bunny@bugzilla.org>"
+      ' master~10..master
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    git filter-repo --message-callback '
+      return message + b"Acked-by: Bugs Bunny <bunny@bugzilla.org>\n"
+      ' --refs master~10..master
+    ```
+  </Tab>
+</Tabs>
+
+### Changing Author/Committer Info
+
+Update email addresses throughout history:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    git filter-branch --env-filter '
+      if test "$GIT_AUTHOR_EMAIL" = "root@localhost"
+      then
+        GIT_AUTHOR_EMAIL=john@example.com
+      fi
+      if test "$GIT_COMMITTER_EMAIL" = "root@localhost"
+      then
+        GIT_COMMITTER_EMAIL=john@example.com
+      fi
+      ' -- --all
+    ```
+  </Tab>
+  <Tab title="filter-repo (mailmap)">
+    ```bash
+    # Add to .mailmap:
+    # <john@example.com> <root@localhost>
+    
+    git filter-repo --use-mailmap
+    ```
+  </Tab>
+  <Tab title="filter-repo (callback)">
+    ```bash
+    git filter-repo --email-callback '
+      return email if email != b"root@localhost" \
+        else b"john@example.com"
+      '
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+Both filter-repo methods also update tagger emails, which filter-branch doesn't handle.
+</Note>
+
+### Restricting to a Range
+
+Filter only specific commit ranges:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    # Simple range
+    git filter-branch ... C..H
+    
+    # Excluding commits
+    git filter-branch ... C..H ^D
+    git filter-branch ... D..H ^C
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    # Simple range
+    git filter-repo ... --refs C..H
+    
+    # Excluding commits
+    git filter-repo ... --refs C..H ^D
+    git filter-repo ... --refs D..H ^C
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+Use `^C` instead of `--not C` with filter-repo to avoid flag parsing issues.
+</Note>
+
+## Advanced Conversions
+
+### Running Code Formatters
+
+Apply a code formatter to all matching files in history:
+
+<Tabs>
+  <Tab title="filter-branch">
+    ```bash
+    # Runs on every commit, even those without C files
+    git filter-branch --tree-filter '
+      git ls-files -z "*.c" \
+        | xargs -0 -n 1 clang-format -style=file -i
+      '
+    ```
+  </Tab>
+  <Tab title="filter-repo (callback)">
+    ```bash
+    git filter-repo --file-info-callback '
+      if not filename.endswith(b".c"):
+        return (filename, mode, blob_id)
+      
+      contents = value.get_contents_by_identifier(blob_id)
+      tmpfile = os.path.basename(filename)
+      
+      with open(tmpfile, "wb") as f:
+        f.write(contents)
+      
+      subprocess.check_call(["clang-format", "-style=file", 
+                            "-i", filename])
+      
+      with open(filename, "rb") as f:
+        contents = f.read()
+      
+      new_blob_id = value.insert_file_with_contents(contents)
+      return (filename, mode, new_blob_id)
+      '
+    ```
+  </Tab>
+  <Tab title="filter-repo (lint-history)">
+    ```bash
+    # Using the lint-history contrib script
+    lint-history --relevant 'return filename.endswith(b".c")' \
+      clang-format -style=file -i
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+The [lint-history](https://github.com/newren/git-filter-repo/blob/main/contrib/filter-repo-demos/lint-history) script simplifies code formatting operations while maintaining filter-repo's automatic handling of commit message rewrites and empty commit pruning.
+</Tip>
+
+## Migration Tips
+
+### Performance
+filter-repo is significantly faster than filter-branch, especially for large repositories:
+- No checkout overhead
+- Operates on fast-export stream
+- Efficient blob handling
+
+### Safety
+filter-repo includes built-in safety features:
+- Refuses to run on repos with uncommitted changes
+- Creates backups by default
+- Validates operations before execution
+
+### Next Steps
+
+1. **Test on a clone first**: Always test migrations on a repository copy
+2. **Review changes**: Use `git log` and `git diff` to verify results
+3. **Update remotes**: After successful migration, force-push to update remote repositories
+4. **Inform collaborators**: Everyone needs to re-clone after history rewriting
+
+<Card title="Need More Examples?" icon="book">
+  See the [Examples](/examples/cheat-sheet) for common filtering patterns and advanced use cases.
+</Card>

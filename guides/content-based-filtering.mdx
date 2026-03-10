@@ -1,0 +1,474 @@
+---
+title: 'Content-Based Filtering'
+description: 'Filter and modify file contents throughout repository history'
+---
+
+## Overview
+
+Content-based filtering allows you to modify file contents, remove large files, or replace sensitive data across your entire repository history. This is essential for cleaning up committed secrets, fixing typos, or removing unwanted content.
+
+## Text Replacement
+
+### Replace Sensitive Data
+
+Remove passwords, tokens, or other sensitive text from history:
+
+<Tabs>
+  <Tab title="Create expressions.txt">
+    ```text
+    # Simple literal replacement (default is ***REMOVED***)
+    my-secret-password
+    
+    # Custom replacement
+    oldpassword==>newpassword
+    
+    # Remove lines containing specific text
+    glob:*666*==>
+    
+    # Replace with regex
+    regex:\bdriver\b==>pilot
+    ```
+  </Tab>
+  <Tab title="Run filter-repo">
+    ```bash
+    git filter-repo --replace-text expressions.txt
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+**Security Note**
+
+After removing sensitive data, you MUST:
+1. **Rotate/revoke** the exposed credentials
+2. Force push to all remotes
+3. Ensure all team members reclone
+
+See [Sensitive Data Removal](#sensitive-data-removal) below.
+</Warning>
+
+### Replacement Syntax
+
+The expressions file supports multiple formats:
+
+<CodeGroup>
+```text Literal (Default)
+# Replaces exact text with ***REMOVED***
+p455w0rd
+secret-token-abc123
+
+# Custom replacement
+foo==>bar
+```
+
+```text Glob Patterns
+# Remove any line containing 666
+glob:*666*==>
+
+# Replace any occurrence of test-*
+glob:test-*==>production-
+```
+
+```text Regular Expressions
+# Replace the word "driver" (not "drivers")
+regex:\bdriver\b==>pilot
+
+# Reformat dates from MM/DD/YYYY to YYYY-MM-DD
+regex:([0-9]{2})/([0-9]{2})/([0-9]{4})==>
+\3-\1-\2
+
+# Multi-line matching ((?s) enables . to match newlines)
+regex:(?s)/\*.*?\*/==>/* removed */
+```
+</CodeGroup>
+
+<Note>
+**Default Replacement**
+
+If `==>` is not specified, the default replacement is `***REMOVED***`.
+</Note>
+
+### Regex Features
+
+Python regex syntax is supported:
+
+```text
+# Word boundaries
+regex:\bapi_key\b==>***REMOVED***
+
+# Case-insensitive matching
+regex:(?i)password==>***REMOVED***
+
+# Capture groups and back-references
+regex:email:\s*([^\s]+)==>email: ***REMOVED***
+
+# Multi-line mode (^ and $ match line start/end)
+regex:(?m)^TODO:.*$==>TODO: [removed]
+```
+
+See [Python regex documentation](https://docs.python.org/3/library/re.html) for full syntax.
+
+## Stripping Large Files
+
+### By Size Threshold
+
+Remove all files larger than a specific size:
+
+```bash
+# Remove files larger than 10MB
+git filter-repo --strip-blobs-bigger-than 10M
+
+# Supports K, M, G suffixes
+git filter-repo --strip-blobs-bigger-than 500K
+git filter-repo --strip-blobs-bigger-than 2G
+```
+
+<Tip>
+**Find Large Files First**
+
+Use `--analyze` to identify large files:
+```bash
+git filter-repo --analyze
+cat .git/filter-repo/analysis/path-all-sizes.txt | head -20
+```
+</Tip>
+
+### By Blob ID
+
+Remove specific files by their git object hash:
+
+<Tabs>
+  <Tab title="Find Blob IDs">
+    ```bash
+    # Analyze repository
+    git filter-repo --analyze
+    
+    # Extract specific blob hashes
+    grep 'large-file' \
+      .git/filter-repo/analysis/blob-shas-and-paths.txt \
+      | cut -d' ' -f2 > blobs-to-remove.txt
+    ```
+  </Tab>
+  <Tab title="Remove Blobs">
+    ```bash
+    git filter-repo --strip-blobs-with-ids blobs-to-remove.txt
+    ```
+  </Tab>
+</Tabs>
+
+Format of blob ID file:
+```text
+1234567890abcdef1234567890abcdef12345678
+abcdef1234567890abcdef1234567890abcdef12
+9876543210fedcba9876543210fedcba98765432
+```
+
+## Modifying File Contents
+
+### Using Blob Callback
+
+Modify file contents programmatically:
+
+```bash
+git filter-repo --blob-callback '
+  # Skip binary files
+  if b"\0" in blob.data[0:8192]:
+    return
+  
+  # Replace text in all files
+  blob.data = blob.data.replace(b"old-text", b"new-text")
+  
+  # Remove files over 1MB
+  if len(blob.data) > 1048576:
+    blob.skip()
+'
+```
+
+<Note>
+**Binary Detection**
+
+Check for null bytes in first 8KB to detect binary files:
+```python
+if b"\0" in blob.data[0:8192]:
+  # This is likely a binary file
+```
+</Note>
+
+### Using File Info Callback
+
+Filter based on filename, mode, and contents:
+
+```bash
+git filter-repo --file-info-callback '
+  # Only process .config files
+  if not filename.endswith(b".config"):
+    return (filename, mode, blob_id)
+  
+  # Get file contents
+  contents = value.get_contents_by_identifier(blob_id)
+  
+  # Modify contents
+  new_contents = contents.replace(b"production", b"development")
+  
+  # Insert modified blob
+  new_blob_id = value.insert_file_with_contents(new_contents)
+  
+  # Rename file
+  new_filename = filename[:-7] + b".cfg"
+  
+  return (new_filename, mode, new_blob_id)
+'
+```
+
+### Apply Replace Text Selectively
+
+Use `--replace-text` with `--file-info-callback` for selective replacement:
+
+```bash
+git filter-repo \
+  --replace-text passwords.txt \
+  --file-info-callback '
+    # Only apply replacement to .js files
+    if not filename.endswith(b".js"):
+      return (filename, mode, blob_id)
+    
+    contents = value.get_contents_by_identifier(blob_id)
+    new_contents = value.apply_replace_text(contents)
+    new_blob_id = value.insert_file_with_contents(new_contents)
+    return (filename, mode, new_blob_id)
+  '
+```
+
+<Warning>
+When using `--file-info-callback`, `--replace-text` replacements are NOT automatically applied. You must call `value.apply_replace_text()` explicitly.
+</Warning>
+
+## Performance Optimization
+
+### Cache Transformations
+
+Avoid reprocessing the same blob multiple times:
+
+```bash
+git filter-repo --file-info-callback '
+  # Skip non-target files
+  if not filename.endswith(b".txt"):
+    return (filename, mode, blob_id)
+  
+  # Check cache first
+  if blob_id in value.data:
+    return (filename, mode, value.data[blob_id])
+  
+  # Process blob
+  contents = value.get_contents_by_identifier(blob_id)
+  new_contents = contents.upper()  # Example transformation
+  new_blob_id = value.insert_file_with_contents(new_contents)
+  
+  # Cache result
+  value.data[blob_id] = new_blob_id
+  
+  return (filename, mode, new_blob_id)
+'
+```
+
+## Sensitive Data Removal
+
+For removing sensitive data (passwords, API keys, etc.):
+
+### Step 1: Prepare
+
+```bash
+# Clone a fresh copy
+git clone --no-local /path/to/original repo-cleanup
+cd repo-cleanup
+
+# CRITICAL: Rotate/revoke the exposed credentials first!
+```
+
+### Step 2: Create Expressions File
+
+```text sensitive.txt
+# Literal passwords/keys
+sk_live_abc123
+PASSWORD=supersecret
+
+# Patterns
+regex:api[_-]?key\s*[:=]\s*['"]?[a-zA-Z0-9]{32,}
+regex:password\s*[:=]\s*['"]?[^'"\s]+
+```
+
+### Step 3: Remove Data
+
+```bash
+git filter-repo \
+  --replace-text sensitive.txt \
+  --sensitive-data-removal
+```
+
+<Note>
+**--sensitive-data-removal flag:**
+- Fetches all refs (not just branches/tags)
+- Tracks first changed commits
+- Reports orphaned LFS objects
+- Provides cleanup instructions
+</Note>
+
+### Step 4: Verify Removal
+
+```bash
+# Search for the sensitive data
+git log -S "api_key" --all -p --
+
+# Should return nothing if successful
+```
+
+### Step 5: Push and Clean Up
+
+```bash
+# Force push all refs
+git push --force --mirror origin
+
+# Inform team to delete and reclone
+# Follow instructions from filter-repo output
+```
+
+<Warning>
+**Critical Steps:**
+
+1. **Rotate credentials** before running filter-repo
+2. **Force push** to overwrite remote history
+3. **Delete all clones** and have team members reclone
+4. **Clean up code review systems** (GitHub PRs, GitLab MRs, etc.)
+5. **Remove LFS objects** if applicable
+
+See [Git Filter-Repo documentation](https://github.com/newren/git-filter-repo) for detailed cleanup procedures.
+</Warning>
+
+## Binary Files
+
+### Skip Binary Files
+
+```bash
+git filter-repo --blob-callback '
+  if value.is_binary(blob.data):
+    return  # Leave binary files unchanged
+  
+  # Process text files only
+  blob.data = blob.data.replace(b"old", b"new")
+'
+```
+
+### Remove Specific Binary Types
+
+```bash
+# Remove all video files
+git filter-repo --invert-paths \
+  --path-glob '*.mp4' \
+  --path-glob '*.avi' \
+  --path-glob '*.mov'
+```
+
+## Common Examples
+
+### Remove Accidentally Committed .env File
+
+```bash
+# Remove the file
+git filter-repo --invert-paths --path .env
+
+# Also replace any exposed values
+cat > secrets.txt <<EOF
+DATABASE_PASSWORD=mypassword
+API_KEY=sk_live_abc123
+SECRET_TOKEN=xyz789
+EOF
+
+git filter-repo --replace-text secrets.txt
+```
+
+### Fix Typo Throughout History
+
+```text fixes.txt
+regex:\bteh\b==>the
+regex:\brecieve\b==>receive
+regex:\boccured\b==>occurred
+```
+
+```bash
+git filter-repo --replace-text fixes.txt
+```
+
+### Sanitize Configuration Files
+
+```bash
+cat > sanitize.txt <<EOF
+# Remove actual URLs
+regex:https?://[^\s"'<>]+/*==>https://example.com
+
+# Remove IP addresses
+regex:\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b==>0.0.0.0
+
+# Remove email addresses
+regex:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}==>user@example.com
+EOF
+
+git filter-repo --replace-text sanitize.txt
+```
+
+### Remove Debug Logging
+
+```bash
+git filter-repo --blob-callback '
+  if b"\0" not in blob.data[0:8192]:
+    # Remove console.log statements
+    lines = blob.data.split(b"\n")
+    lines = [l for l in lines if b"console.log(" not in l]
+    blob.data = b"\n".join(lines)
+'
+```
+
+## File Mode Changes
+
+Modify file permissions in history:
+
+```bash
+git filter-repo --file-info-callback '
+  # Make all .sh files executable
+  if filename.endswith(b".sh"):
+    return (filename, b"100755", blob_id)
+  
+  # Make all other files non-executable
+  return (filename, b"100644", blob_id)
+'
+```
+
+<Note>
+**Valid Git Modes:**
+- `100644` - Regular non-executable file
+- `100755` - Executable file/script
+- `120000` - Symbolic link
+- `160000` - Git submodule
+</Note>
+
+## Limitations
+
+<Warning>
+**Regex Limitations**
+
+- Globs and regexes apply to entire file contents
+- No special flags are enabled by default
+- Use `(?m)` for multi-line mode, `(?s)` for dot-matches-newline
+- Very large files may cause memory issues
+</Warning>
+
+<Note>
+**Multiple Matches**
+
+If a pattern matches multiple times in a file, ALL occurrences are replaced.
+</Note>
+
+## Next Steps
+
+- Learn about [Commit Message Rewriting](/guides/commit-message-rewriting)
+- Explore [Advanced Filtering](/guides/advanced-filtering) for complex operations
+- See [Library Usage](/guides/library-usage) for programmatic filtering

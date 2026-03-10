@@ -1,0 +1,408 @@
+---
+title: Demo Scripts
+description: Contributed scripts that demonstrate git-filter-repo's library capabilities
+---
+
+The `contrib/filter-repo-demos/` directory contains several example scripts that demonstrate how to use git-filter-repo as a Python library. These scripts showcase the flexibility of filter-repo for creating custom history rewriting tools.
+
+<Note>
+  All scripts require a symlink to `git-filter-repo` named `git_filter_repo.py` in your PYTHONPATH to run. Each script has a `--help` flag for detailed usage information.
+</Note>
+
+## barebones-example
+
+A minimal starting point showing the basic imports and structure needed to use git-filter-repo as a library.
+
+### Purpose
+
+Demonstrates the simplest possible filter-repo program with no modifications to default behavior. Use this as a template for building your own custom tools.
+
+### Usage
+
+```bash
+./barebones-example [filter-repo options]
+```
+
+### Key Code
+
+```python
+import git_filter_repo as fr
+
+args = fr.FilteringOptions.parse_args(sys.argv[1:])
+if args.analyze:
+  fr.RepoAnalyze.run(args)
+else:
+  filter = fr.RepoFilter(args)
+  filter.run()
+```
+
+This is the foundation for any custom filter-repo tool. From here, you can add callbacks or modify the args before creating the filter.
+
+## insert-beginning
+
+Adds a file (like LICENSE or COPYING) to the very first commit(s) in repository history.
+
+### Purpose
+
+Useful when you need to retroactively add a license file, .gitignore, or other configuration file to the beginning of your project's history.
+
+### Usage
+
+```bash
+./insert-beginning --file path/to/LICENSE
+```
+
+### Features
+
+- Adds the specified file to all root commits
+- Preserves original file permissions (executable bit)
+- Automatically rewrites commit hashes in commit messages
+
+### Example
+
+```bash
+# Add MIT license to the first commit
+cp ~/templates/MIT-LICENSE LICENSE
+./insert-beginning --file LICENSE
+```
+
+### How It Works
+
+The script uses a commit callback that checks if a commit has no parents (i.e., it's a root commit), then adds a `FileChange` entry for the specified file:
+
+```python
+def fixup_commits(commit, metadata):
+  if len(commit.parents) == 0:
+    commit.file_changes.append(fr.FileChange(b'M', args.file, fhash, fmode))
+```
+
+## signed-off-by
+
+Adds `Signed-off-by:` tags to a range of commits.
+
+### Purpose
+
+Automatically adds sign-off trailers to commits, useful for projects requiring Developer Certificate of Origin (DCO) sign-offs.
+
+### Usage
+
+```bash
+# Add to last 4 commits on master
+./signed-off-by master~4..master
+
+# Add to multiple branches
+./signed-off-by master develop maint ^next
+```
+
+### Features
+
+- Uses `git config user.name` and `user.email` for the sign-off
+- Intelligently places trailers (adjacent to existing trailers, separated by blank line otherwise)
+- Won't duplicate if `Signed-off-by:` already exists
+
+### Note
+
+<Info>
+  `git rebase --signoff` provides similar functionality and is generally recommended for new commits. This script is primarily a demonstration of what can be done with filter-repo.
+</Info>
+
+### How It Works
+
+```python
+trailer = b'Signed-off-by: %s <%s>' % (user_name, user_email)
+
+def add_signed_off_by_trailer(commit, metadata):
+  if trailer in commit.message:
+    return
+  if not commit.message.endswith(b'\n'):
+    commit.message += b'\n'
+  lastline = commit.message.splitlines()[-1]
+  if not re.match(b'[A-Za-z0-9-_]*: ', lastline):
+    commit.message += b'\n'  # Add blank line before trailer
+  commit.message += trailer
+```
+
+## lint-history
+
+Runs a linting or formatting program on all files in history.
+
+### Purpose
+
+Apply code formatters, linters, or any file transformation tool across your entire repository history. This is incredibly powerful for retroactively enforcing code style.
+
+### Usage
+
+```bash
+# Run dos2unix on all non-binary files
+./lint-history dos2unix
+
+# Run eslint --fix on all .js files
+./lint-history --relevant 'return filename.endswith(b".js")' eslint --fix
+
+# Run clang-format on C files
+./lint-history --relevant 'return filename.endswith(b".c")' clang-format -style=file -i
+
+# Run prettier on specific directory
+./lint-history --relevant 'return filename.startswith(b"src/")' prettier --write
+```
+
+### Options
+
+<ParamField path="--relevant" type="string">
+  Python code to determine whether to apply linter to a given filename. Implies `--filenames-important`.
+  
+  Example: `'return filename.endswith(b".txt")'`
+</ParamField>
+
+<ParamField path="--filenames-important" type="boolean">
+  Write files with their original basename (needed if linter requires correct file extension).
+</ParamField>
+
+<ParamField path="--refs" type="list">
+  Limit to specified refs (implies `--partial`).
+</ParamField>
+
+### Features
+
+- Only processes files that match your criteria
+- Preserves filenames when needed for extension-aware tools
+- Automatically rewrites commit hashes in messages
+- Uses temporary directory for file operations (configurable via `$TMPDIR`)
+
+### Performance Note
+
+Unlike filter-branch which would run the linter on every file in every commit, lint-history only processes each unique blob once, making it significantly faster.
+
+### Advanced Examples
+
+See [GitHub issue #45](https://github.com/newren/git-filter-repo/issues/45) for community modifications for Python files, Jupyter notebooks, Java files, and more.
+
+## clean-ignore
+
+Deletes files from history that match current `.gitignore` rules.
+
+### Purpose
+
+Remove files that should never have been committed because they match your current gitignore patterns.
+
+### Usage
+
+```bash
+./clean-ignore
+```
+
+### Features
+
+- Uses `git check-ignore` to determine which files to remove
+- Respects negation patterns (lines starting with `!`)
+- Prunes commits that become empty
+- Prunes merge commits that become degenerate
+- Rewrites commit hashes in commit messages
+
+### How It Works
+
+The script maintains two sets (ignored and okay) and queries `git check-ignore` for each file:
+
+```python
+class CheckIgnores:
+  def get_ignored(self, filenames):
+    # Checks each filename against .gitignore rules
+    # Returns set of files that should be ignored
+  
+  def skip_ignores(self, commit, metadata):
+    filenames = [x.filename for x in commit.file_changes]
+    bad = self.get_ignored(filenames)
+    commit.file_changes = [x for x in commit.file_changes
+                           if x.filename not in bad]
+```
+
+### Example Workflow
+
+```bash
+# Add comprehensive .gitignore rules
+cat >> .gitignore <<EOF
+*.log
+*.tmp
+build/
+dist/
+node_modules/
+.env
+EOF
+
+# Remove all matching files from history
+./clean-ignore
+```
+
+## filter-lamely (filter-branch-ish)
+
+A bug-compatible reimplementation of `git filter-branch`, but faster.
+
+### Purpose
+
+<Warning>
+  This is **NOT** recommended for actual use. It exists solely to demonstrate filter-repo's flexibility. Use `git filter-repo` directly instead.
+</Warning>
+
+Demonstrates that filter-repo can emulate even legacy tools like filter-branch. The git regression test suite passes when using filter-lamely instead of filter-branch.
+
+### Why It Exists
+
+- Proof of concept that filter-repo can implement any history rewriting tool
+- Provides migration path for existing filter-branch users
+- Shows how much faster filter-repo is even when constrained by filter-branch's API
+
+### Intentional Differences
+
+- `--tree-filter` and `--index-filter` only operate on changed files (performance optimization)
+- Simplified `map()` function (ignores writing mapping file)
+- No `--parent-filter` (obsoleted by `git replace --graft`)
+
+### Usage
+
+Replace `git filter-branch` with `./filter-lamely` in your existing commands:
+
+```bash
+# Old filter-branch command:
+# git filter-branch --tree-filter 'rm -f password.txt' HEAD
+
+# Using filter-lamely:
+./filter-lamely --tree-filter 'rm -f password.txt' HEAD
+```
+
+## bfg-ish
+
+A reimplementation of BFG Repo Cleaner with bug fixes and new features.
+
+### Purpose
+
+Provides BFG-compatible interface with improvements:
+
+**New Features:**
+- Automatic repacking (more robust than BFG)
+- Prunes commits that become empty
+- Creates replace refs for old commit hashes
+- Respects grafts and replace refs
+- Auto-updates commit encoding to UTF-8
+
+**Bug Fixes:**
+- Works with loose objects (not just packfiles)
+- Works with loose refs (not just packed-refs)
+- Works with replace refs
+- Updates index and working tree at end
+- `--no-blob-protection` made safe and default
+
+### Usage
+
+Replace `java -jar bfg.jar` with `./bfg-ish`:
+
+```bash
+# Old BFG command:
+# java -jar bfg.jar --strip-blobs-bigger-than 100M some-repo.git
+
+# Using bfg-ish:
+./bfg-ish --strip-blobs-bigger-than 100M
+```
+
+### Note from Author
+
+> Even with all these improvements, I think filter-repo is the better tool, and thus I suggest folks use it. I have no plans to improve bfg-ish further. However, bfg-ish serves as a nice demonstration of the ability to use filter-repo to write different filtering tools.
+
+## convert-svnexternals
+
+Inserts Git submodules according to SVN externals definitions from converted Subversion repositories.
+
+### Purpose
+
+When migrating from SVN to Git using SubGit, this script converts `svn:externals` properties to proper Git submodules throughout history.
+
+### Prerequisites
+
+- Repository must be converted using [SubGit](https://subgit.com/)
+- SubGit must be run with `translate.externals=true` config option
+- Creates `.gitsvnextmodules` file during conversion
+- Requires SVN-to-Git mapping file
+
+### Usage
+
+```bash
+./convert-svnexternals --mapping svn-git-map.txt
+```
+
+### Features
+
+- Inserts gitlinks (mode 160000) into trees
+- Adds `.gitmodules` file with relevant sections
+- Removes converted sections from `.gitsvnextmodules`
+- Handles repeatedly added/removed externals
+- Handles externals replaced by direct files
+
+### Mapping File Format
+
+```
+<svn url> TAB <svn rev> TAB <git url> TAB <git commit> TAB <state>
+```
+
+Example:
+```
+https://svn.example.com/somesvnrepo/trunk	1234	https://git.example.com/somegitrepo.git	1234123412341234123412341234123412341234	commit
+```
+
+### Caveats
+
+<Warning>
+  - Must NOT be run repeatedly
+  - No handling for inconsistent SVN repos
+  - No error handling for mandatory options missing in `.gitsvnextmodules`
+</Warning>
+
+## Purpose of These Scripts
+
+<Info>
+  These scripts are not meant to be complete production tools, but rather **demonstrations** of filter-repo's library capabilities. They show that extremely varied history rewriting tools can be created that automatically inherit:
+  
+  - Rewriting hashes in commit messages
+  - Pruning commits that become empty
+  - Handling filenames with special characters
+  - Non-standard encodings
+  - Handling of replace refs
+  - And much more
+</Info>
+
+More examples of using filter-repo as a library can be found in the [test suite](https://github.com/newren/git-filter-repo/tree/main/t/t9391).
+
+## Using the Scripts
+
+### Setup
+
+1. Create a symlink to `git-filter-repo`:
+   ```bash
+   ln -s /path/to/git-filter-repo git_filter_repo.py
+   ```
+
+2. Add to your `PYTHONPATH`:
+   ```bash
+   export PYTHONPATH="/path/to/directory/containing/symlink:$PYTHONPATH"
+   ```
+
+3. Make scripts executable:
+   ```bash
+   chmod +x contrib/filter-repo-demos/*
+   ```
+
+### Getting Help
+
+Every script supports `--help`:
+
+```bash
+./lint-history --help
+./insert-beginning --help
+./clean-ignore --help
+```
+
+## Extending These Scripts
+
+<Tip>
+  The author's hope is that these examples provide useful functionality but are each missing at least one critical piece for your use case. **Go forth and extend and improve!**
+</Tip>
+
+Use these scripts as starting points for your own custom tools. The library provides access to all aspects of repository history, allowing you to create specialized tools for your specific needs.

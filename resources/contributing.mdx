@@ -1,0 +1,160 @@
+---
+title: Contributing
+description: Guidelines for contributing to git-filter-repo
+---
+
+Welcome to the community! We're excited that you're interested in contributing to git-filter-repo.
+
+## Contribution Standards
+
+Contributions need to meet the bar for inclusion in git.git. Although filter-repo is not part of the git.git repository, we want to leave the option open for it to be merged in the future. As such, any contributions need to follow the same [guidelines for contribution to git.git](https://git.kernel.org/pub/scm/git/git.git/tree/Documentation/SubmittingPatches), with a few exceptions noted below.
+
+## How to Submit Changes
+
+### For Small Changes
+
+For very short single-commit changes, feel free to open GitHub Pull Requests.
+
+### For Larger Changes
+
+For more involved changes:
+- Prefer using `git format-patch` and `git send-email` when possible
+- If format-patch or send-email give you too much trouble, go ahead and open a GitHub PR and mention that email didn't work out
+
+### If Emailing Patches
+
+If you choose to email patches to the git list:
+
+1. **Include "filter-repo" at the start of the subject:**
+   ```
+   [filter-repo PATCH] Add packaging scripts for uploading to PyPI
+   ```
+   Instead of just:
+   ```
+   [PATCH] Add packaging scripts for uploading to PyPI
+   ```
+
+2. **CC the maintainer** instead of the git maintainer
+
+<Note>
+  While GitHub PRs are not the preferred method for the git project, git-format-patch and git-send-email can be challenging. We accept PRs to make contributing easier, especially for newcomers.
+</Note>
+
+## Coding Guidelines
+
+### Python Version Requirements
+
+- **Python 3 is required** - Python 2 reached EOL at the end of 2019 and is not supported
+- You can depend on anything in **Python 3.6 or earlier**
+- This minimum version may be bumped over time, but generally aims to work with the Python 3 version found in current enterprise Linux distributions
+
+### Python Style Guidelines
+
+Git's [CodingGuidelines for python code](https://github.com/git/git/blob/v2.24.0/Documentation/CodingGuidelines#L482-L494) are only partially applicable:
+
+#### Bytestrings vs Unicode Strings
+
+<Warning>
+  In filter-repo, you are **expected** to use bytestrings extensively.
+</Warning>
+
+Using unicode strings result in lots of ugly errors since input comes from:
+- Filesystem names
+- Commit messages
+- File contents
+- None of which are guaranteed to be unicode
+
+Unicode strings require lots of effort to verify, encode, and decode - slowing the filtering process down. While unicode strings were attempted multiple times in the codebase, it's a bad idea to use an abstraction that doesn't fit the data.
+
+#### Code Formatting
+
+- **Use two-space indents** for consistency with the existing codebase
+- Otherwise, generally follow [PEP 8](https://www.python.org/dev/peps/pep-0008/)
+
+### Testing Requirements
+
+<Warning>
+  Line coverage of git-filter-repo must remain at 100%.
+</Warning>
+
+If you add or modify code, please test line coverage:
+
+```bash
+make test
+```
+
+This will:
+- Run the testsuite under [coverage3](https://pypi.org/project/coverage/) (which you'll need to install)
+- Report on line coverage
+- Line coverage of contrib and test scripts can be ignored
+- Only git-filter-repo itself must maintain 100% coverage
+
+## Code Review Process
+
+### Don't Be Intimidated by Detailed Feedback
+
+In the git community, thorough reviews are standard practice:
+
+- Even experienced contributors receive detailed feedback
+- It's common to spend as much or more time fixing up patches after submitting them as creating the initial version
+- This process is valuable for learning and maintaining code quality
+- The goal is to make contributions acceptable for git.git itself
+
+<Tip>
+  Detailed code reviews are a sign of a healthy project that values quality. Embrace the feedback as an opportunity to learn and improve.
+</Tip>
+
+## What Makes a Good Contribution
+
+### Well-Tested Code
+
+- All code paths should be tested
+- Edge cases should be covered
+- Tests should be clear and maintainable
+
+### Clear Documentation
+
+- Update relevant documentation for your changes
+- Include examples where appropriate
+- Explain the "why" not just the "what"
+
+### Following Conventions
+
+- Match the existing code style
+- Use consistent naming
+- Follow established patterns in the codebase
+
+## Areas for Contribution
+
+Some ways you can contribute:
+
+- **Bug fixes** - Fix issues reported by users
+- **Performance improvements** - Make filtering faster
+- **Documentation** - Improve clarity and add examples
+- **Test coverage** - Add tests for edge cases
+- **New features** - Add capabilities that fit the tool's design philosophy
+- **Example scripts** - Create helpful filter-repo demos
+
+## Getting Started
+
+1. **Fork the repository** on GitHub
+2. **Clone your fork** locally
+3. **Create a branch** for your changes
+4. **Make your changes** following the guidelines above
+5. **Test thoroughly** including running `make test`
+6. **Submit** via PR or email as appropriate
+
+## Questions?
+
+If you have questions about contributing:
+
+- Review the [FAQ](/resources/faq)
+- Check existing [GitHub issues](https://github.com/newren/git-filter-repo/issues)
+- Look at [previous contributions](https://github.com/newren/git-filter-repo/pulls?q=is%3Apr) for examples
+- Open a discussion issue to ask questions before starting major work
+
+## Code of Conduct
+
+Participants in the filter-repo community are expected to adhere to the same standards as for the git project. The [git Code of Conduct](https://git.kernel.org/pub/scm/git/git.git/tree/CODE_OF_CONDUCT.md) applies.
+
+Thank you for contributing to git-filter-repo!

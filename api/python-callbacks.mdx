@@ -1,0 +1,639 @@
+---
+title: "Callbacks"
+description: "Understanding and using the callback system"
+---
+
+## Overview
+
+Callbacks are functions you provide to `RepoFilter` that get called when processing different Git objects. They allow you to inspect and modify repository history programmatically.
+
+## Callback Types
+
+git-filter-repo supports several types of callbacks, each called at different points during filtering.
+
+### Object Callbacks
+
+Called for each Git object (with full object access):
+
+- `blob_callback` - Called for each blob (file content)
+- `commit_callback` - Called for each commit
+- `tag_callback` - Called for each annotated tag
+- `reset_callback` - Called for each branch reset
+
+### Field Callbacks
+
+Called for specific fields (simpler, string-based):
+
+- `filename_callback` - Called for each filename
+- `message_callback` - Called for commit/tag messages
+- `name_callback` - Called for author/committer/tagger names
+- `email_callback` - Called for email addresses
+- `refname_callback` - Called for branch/tag names
+
+### Special Callbacks
+
+- `file_info_callback` - Advanced callback with access to file contents and metadata
+- `done_callback` - Called once when filtering completes
+
+## Callback Signatures
+
+### blob_callback
+
+```python
+def blob_callback(blob: Blob, metadata: dict) -> None:
+    """Called for each blob."""
+    pass
+```
+
+<ParamField path="blob" type="Blob" required>
+The blob object to process. Modify `blob.data` to change contents.
+</ParamField>
+
+<ParamField path="metadata" type="dict" required>
+Contains `commit_rename_func`, `ancestry_graph`, `original_ancestry_graph`
+</ParamField>
+
+**Example:**
+
+```python
+def blob_callback(blob, metadata):
+    # Skip binary files
+    if b"\0" in blob.data[0:8192]:
+        return
+    
+    # Replace text in all text files
+    blob.data = blob.data.replace(b'TODO', b'DONE')
+    
+    # Skip large files
+    if len(blob.data) > 5_000_000:
+        blob.skip()
+```
+
+### commit_callback
+
+```python
+def commit_callback(commit: Commit, metadata: dict) -> None:
+    """Called for each commit."""
+    pass
+```
+
+<ParamField path="commit" type="Commit" required>
+The commit object to process. Modify any attribute.
+</ParamField>
+
+<ParamField path="metadata" type="dict" required>
+Includes `commit_rename_func`, `ancestry_graph`, `original_ancestry_graph`, `orig_parents`, `had_file_changes`
+</ParamField>
+
+**Example:**
+
+```python
+def commit_callback(commit, metadata):
+    # Add sign-off to all commits
+    author = f"{commit.author_name.decode()} <{commit.author_email.decode()}>"
+    sign_off = f"\n\nSigned-off-by: {author}".encode()
+    if sign_off not in commit.message:
+        commit.message = commit.message.rstrip() + sign_off
+    
+    # Filter file changes
+    commit.file_changes = [
+        c for c in commit.file_changes
+        if c.filename.startswith(b'src/')
+    ]
+    
+    # Skip if commit becomes empty
+    if not commit.file_changes and commit.parents:
+        commit.skip(commit.first_parent())
+```
+
+### tag_callback
+
+```python
+def tag_callback(tag: Tag, metadata: dict) -> None:
+    """Called for each annotated tag."""
+    pass
+```
+
+<ParamField path="tag" type="Tag" required>
+The tag object to process
+</ParamField>
+
+<ParamField path="metadata" type="dict" required>
+Standard metadata dict
+</ParamField>
+
+**Example:**
+
+```python
+def tag_callback(tag, metadata):
+    # Rename version tags
+    if tag.ref.startswith(b'v'):
+        tag.ref = b'version-' + tag.ref[1:]
+    
+    # Update tagger email
+    if tag.tagger_email == b'old@example.com':
+        tag.tagger_email = b'new@example.com'
+```
+
+### reset_callback
+
+```python
+def reset_callback(reset: Reset, metadata: dict) -> None:
+    """Called for each branch reset."""
+    pass
+```
+
+**Example:**
+
+```python
+def reset_callback(reset, metadata):
+    # Rename master to main
+    if reset.ref == b'refs/heads/master':
+        reset.ref = b'refs/heads/main'
+```
+
+### filename_callback
+
+```python
+def filename_callback(filename: bytes) -> bytes | None:
+    """Called for each filename. Return None to exclude file."""
+    pass
+```
+
+<ParamField path="filename" type="bytes" required>
+The file path
+</ParamField>
+
+Returns: Modified filename (bytes) or None to exclude the file
+
+**Example:**
+
+```python
+def filename_callback(filename):
+    # Exclude build artifacts
+    if filename.endswith(b'.pyc') or filename.endswith(b'.o'):
+        return None
+    
+    # Rename directory
+    if filename.startswith(b'old_src/'):
+        return b'src/' + filename[8:]
+    
+    return filename
+```
+
+### message_callback
+
+```python
+def message_callback(message: bytes) -> bytes:
+    """Called for commit and tag messages."""
+    pass
+```
+
+**Example:**
+
+```python
+import re
+
+def message_callback(message):
+    # Remove JIRA ticket references
+    message = re.sub(br'\[?PROJ-\d+\]?:?\s*', b'', message)
+    
+    # Normalize line endings
+    message = message.replace(b'\r\n', b'\n')
+    
+    return message
+```
+
+### name_callback
+
+```python
+def name_callback(name: bytes) -> bytes:
+    """Called for author, committer, and tagger names."""
+    pass
+```
+
+**Example:**
+
+```python
+def name_callback(name):
+    # Normalize name format
+    return name.replace(b'Jon', b'John')
+```
+
+### email_callback
+
+```python
+def email_callback(email: bytes) -> bytes:
+    """Called for all email addresses."""
+    pass
+```
+
+**Example:**
+
+```python
+def email_callback(email):
+    # Update company domain
+    if email.endswith(b'@oldcompany.com'):
+        return email.replace(b'@oldcompany.com', b'@newcompany.com')
+    return email
+```
+
+### refname_callback
+
+```python
+def refname_callback(refname: bytes) -> bytes:
+    """Called for branch and tag references."""
+    pass
+```
+
+**Example:**
+
+```python
+def refname_callback(refname):
+    # Add prefix to all branches
+    if refname.startswith(b'refs/heads/'):
+        branch = refname[11:]  # Remove 'refs/heads/'
+        return b'refs/heads/team1-' + branch
+    return refname
+```
+
+### file_info_callback
+
+Advanced callback with access to file contents and utilities.
+
+```python
+def file_info_callback(
+    filename: bytes,
+    mode: bytes,
+    blob_id: int | bytes,
+    value: FileInfoValueHelper
+) -> tuple[bytes, bytes, int | bytes]:
+    """Process file with access to contents."""
+    pass
+```
+
+<ParamField path="filename" type="bytes" required>
+The file path
+</ParamField>
+
+<ParamField path="mode" type="bytes" required>
+File mode (`b'100644'`, `b'100755'`, `b'120000'`, `b'160000'`)
+</ParamField>
+
+<ParamField path="blob_id" type="int | bytes" required>
+The blob mark or hash
+</ParamField>
+
+<ParamField path="value" type="FileInfoValueHelper" required>
+Helper object with utility methods (see below)
+</ParamField>
+
+Returns: `(filename, mode, blob_id)` tuple, or `(filename, None, None)` to delete, or `(None, ...)` to exclude
+
+#### FileInfoValueHelper Methods
+
+<ResponseField name="get_contents_by_identifier(blob_id)" type="method">
+Retrieve blob contents by mark or hash. Returns bytes or None.
+</ResponseField>
+
+<ResponseField name="get_size_by_identifier(blob_id)" type="method">
+Get blob size without reading contents. Returns int.
+</ResponseField>
+
+<ResponseField name="insert_file_with_contents(contents)" type="method">
+Create new blob with given contents. Returns new blob_id.
+</ResponseField>
+
+<ResponseField name="is_binary(contents)" type="method">
+Check if contents appear to be binary. Returns bool.
+</ResponseField>
+
+<ResponseField name="apply_replace_text(contents)" type="method">
+Apply text replacements from `--replace-text`. Returns modified bytes.
+</ResponseField>
+
+<ResponseField name="data" type="dict">
+Custom data storage for passing state between callbacks
+</ResponseField>
+
+**Example:**
+
+```python
+def file_info_callback(filename, mode, blob_id, value):
+    # Only process Python files
+    if not filename.endswith(b'.py'):
+        return (filename, mode, blob_id)
+    
+    # Get file contents
+    contents = value.get_contents_by_identifier(blob_id)
+    if contents is None:
+        return (filename, mode, blob_id)
+    
+    # Skip if binary
+    if value.is_binary(contents):
+        return (filename, mode, blob_id)
+    
+    # Format with black (example)
+    import subprocess
+    import tempfile
+    
+    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
+        f.write(contents)
+        temp_path = f.name
+    
+    try:
+        subprocess.run(['black', temp_path], check=True)
+        with open(temp_path, 'rb') as f:
+            new_contents = f.read()
+    finally:
+        os.unlink(temp_path)
+    
+    # Insert modified blob
+    if new_contents != contents:
+        new_blob_id = value.insert_file_with_contents(new_contents)
+        return (filename, mode, new_blob_id)
+    
+    return (filename, mode, blob_id)
+```
+
+### done_callback
+
+```python
+def done_callback() -> None:
+    """Called once when filtering completes."""
+    pass
+```
+
+**Example:**
+
+```python
+stats = {'count': 0}
+
+def commit_callback(commit, metadata):
+    stats['count'] += 1
+
+def done_callback():
+    print(f"Processed {stats['count']} commits")
+
+filter = fr.RepoFilter(
+    args,
+    commit_callback=commit_callback,
+    done_callback=done_callback
+)
+```
+
+## Metadata Dictionary
+
+Callbacks receive a metadata dictionary with helpful utilities:
+
+### commit_rename_func
+
+Function to translate old commit hashes to new ones.
+
+```python
+def commit_callback(commit, metadata):
+    # Get translation function
+    translate = metadata['commit_rename_func']
+    
+    # Translate hash in commit message
+    if b'cherry-picked from ' in commit.message:
+        # Extract old hash and translate it
+        old_hash = extract_hash(commit.message)
+        new_hash = translate(old_hash)
+        commit.message = commit.message.replace(old_hash, new_hash)
+```
+
+### ancestry_graph
+
+Graph of commit ancestry in the filtered repository.
+
+```python
+def commit_callback(commit, metadata):
+    graph = metadata['ancestry_graph']
+    
+    # Check ancestry relationships
+    if commit.parents:
+        parent_id = commit.parents[0]
+        # graph has methods like is_ancestor(possible_ancestor, commit)
+```
+
+### original_ancestry_graph
+
+Graph of commit ancestry in the original repository.
+
+```python
+def commit_callback(commit, metadata):
+    orig_graph = metadata['original_ancestry_graph']
+    
+    # Get original parents
+    orig_parents = metadata['orig_parents']
+    
+    # Check if was originally a merge
+    if len(orig_parents) >= 2:
+        print(f"Commit {commit.original_id} was a merge")
+```
+
+### orig_parents
+
+Original parent commits before filtering (commit_callback only).
+
+```python
+def commit_callback(commit, metadata):
+    orig_parents = metadata['orig_parents']
+    current_parents = commit.parents
+    
+    if len(orig_parents) != len(current_parents):
+        print("Parents were pruned")
+```
+
+### had_file_changes
+
+Whether commit originally had file changes (commit_callback only).
+
+```python
+def commit_callback(commit, metadata):
+    if metadata['had_file_changes'] and not commit.file_changes:
+        print(f"Commit {commit.original_id} became empty")
+```
+
+## Common Patterns
+
+### Lint History
+
+Run a linter on all files in history:
+
+```python
+import subprocess
+import tempfile
+import os
+
+blobs_handled = {}
+
+def commit_callback(commit, metadata):
+    for change in commit.file_changes:
+        # Skip if already processed
+        if change.blob_id in blobs_handled:
+            change.blob_id = blobs_handled[change.blob_id]
+            continue
+        
+        if change.type == b'D':
+            continue
+        
+        # Only process Python files
+        if not change.filename.endswith(b'.py'):
+            continue
+        
+        # Get contents via git cat-file
+        cmd = ['git', 'cat-file', 'blob', change.blob_id]
+        contents = subprocess.check_output(cmd)
+        
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
+            f.write(contents)
+            temp_path = f.name
+        
+        try:
+            # Run linter
+            subprocess.run(['black', temp_path], check=True)
+            
+            # Read modified contents
+            with open(temp_path, 'rb') as f:
+                new_contents = f.read()
+            
+            # Create new blob
+            if new_contents != contents:
+                blob = fr.Blob(new_contents)
+                filter.insert(blob)
+                blobs_handled[change.blob_id] = blob.id
+                change.blob_id = blob.id
+        finally:
+            os.unlink(temp_path)
+```
+
+### Add File to Beginning
+
+Insert a file into all root commits:
+
+```python
+import subprocess
+
+# Hash the file into git's object database
+file_hash = subprocess.check_output(
+    ['git', 'hash-object', '-w', 'LICENSE']
+).strip()
+
+def commit_callback(commit, metadata):
+    if len(commit.parents) == 0:  # Root commit
+        commit.file_changes.append(
+            fr.FileChange(b'M', b'LICENSE', file_hash, b'100644')
+        )
+```
+
+### Remove Signed-off-by Tags
+
+```python
+import re
+
+def message_callback(message):
+    # Remove all Signed-off-by lines
+    message = re.sub(
+        br'^\s*Signed-off-by:.*$',
+        b'',
+        message,
+        flags=re.MULTILINE
+    )
+    # Clean up extra blank lines
+    message = re.sub(br'\n\n+', b'\n\n', message)
+    return message.strip() + b'\n'
+```
+
+### Track Statistics
+
+```python
+stats = {
+    'commits': 0,
+    'empty_commits_removed': 0,
+    'blobs_modified': 0,
+    'total_size_removed': 0
+}
+
+def blob_callback(blob, metadata):
+    original_size = len(blob.data)
+    
+    # Replace sensitive data
+    blob.data = blob.data.replace(b'SECRET_KEY', b'***')
+    
+    if len(blob.data) != original_size:
+        stats['blobs_modified'] += 1
+        stats['total_size_removed'] += original_size - len(blob.data)
+
+def commit_callback(commit, metadata):
+    stats['commits'] += 1
+    
+    if not commit.file_changes and commit.parents:
+        stats['empty_commits_removed'] += 1
+        commit.skip(commit.first_parent())
+
+def done_callback():
+    print(f"\n=== Statistics ===")
+    print(f"Commits processed: {stats['commits']}")
+    print(f"Empty commits removed: {stats['empty_commits_removed']}")
+    print(f"Blobs modified: {stats['blobs_modified']}")
+    print(f"Total size removed: {stats['total_size_removed']} bytes")
+```
+
+## Combining Multiple Callbacks
+
+You can use multiple callbacks together:
+
+```python
+import git_filter_repo as fr
+
+def my_filename_callback(filename):
+    # Rename directories
+    if filename.startswith(b'old_name/'):
+        return b'new_name/' + filename[9:]
+    return filename
+
+def my_message_callback(message):
+    # Add prefix to all messages
+    return b'[Migrated] ' + message
+
+def my_commit_callback(commit, metadata):
+    # Update author emails
+    if commit.author_email.endswith(b'@old.com'):
+        commit.author_email = commit.author_email.replace(
+            b'@old.com', b'@new.com'
+        )
+
+def my_done_callback():
+    print("Filtering complete!")
+
+args = fr.FilteringOptions.parse_args(['--force'])
+filter = fr.RepoFilter(
+    args,
+    filename_callback=my_filename_callback,
+    message_callback=my_message_callback,
+    commit_callback=my_commit_callback,
+    done_callback=my_done_callback
+)
+filter.run()
+```
+
+## Best Practices
+
+1. **Start Simple**: Begin with field callbacks (filename, message, name, email) before moving to object callbacks
+
+2. **Test on Small Repos**: Test your callbacks on a small test repository first
+
+3. **Handle Encoding**: All strings in git-filter-repo are bytes, not str
+
+4. **Be Careful with skip()**: Skipping commits changes their children's parents
+
+5. **Use file_info_callback for Content**: When you need both filename and contents, use `file_info_callback` instead of `blob_callback`
+
+6. **Track State**: Use module-level or closure variables to track state across callbacks
+
+7. **Check for None**: File operations can return None (e.g., when blobs are stripped)
+
+8. **Preserve Metadata**: Don't forget to update commit messages, dates, etc. as needed

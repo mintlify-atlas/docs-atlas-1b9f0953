@@ -1,0 +1,354 @@
+---
+title: Analyzing Repository
+description: Analyze your repository to identify large files, bloated history, and optimization opportunities
+---
+
+Before rewriting repository history, it's essential to understand what's in your repository. git-filter-repo includes a powerful analysis mode that generates detailed reports.
+
+## Basic Analysis
+
+Generate a comprehensive analysis report:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/example/repo.git
+    cd repo
+    ```
+  </Step>
+
+  <Step title="Run analysis">
+    ```bash
+    git filter-repo --analyze
+    ```
+    
+    This creates reports in the `.git/filter-repo/analysis/` directory without modifying your repository.
+  </Step>
+
+  <Step title="Review the reports">
+    ```bash
+    ls -la .git/filter-repo/analysis/
+    ```
+    
+    Generated reports:
+    - `blob-shas-and-paths.txt` - All blob hashes and their paths
+    - `directories-all-sizes.txt` - Directory sizes across all history
+    - `directories-deleted-sizes.txt` - Size of deleted directories
+    - `extensions-all-sizes.txt` - File types and their sizes
+    - `extensions-deleted-sizes.txt` - Deleted files by extension
+    - `path-all-sizes.txt` - Individual file sizes
+    - `path-deleted-sizes.txt` - Deleted files
+    - `renames.txt` - File rename history
+  </Step>
+</Steps>
+
+<Note>
+  The analysis mode does not modify your repository. It's safe to run multiple times.
+</Note>
+
+## Understanding the Reports
+
+### Largest Files Report
+
+View the biggest files in history:
+
+```bash
+head -20 .git/filter-repo/analysis/path-all-sizes.txt
+```
+
+Output format:
+```
+=== All paths by reverse accumulated size ===
+Format: unpacked size, packed size, date deleted, path name
+  500000000  245000000 <present>  large-file.bin
+  250000000  125000000 <present>  data/dataset.csv
+  100000000   50000000 2024-01-15 old/backup.zip
+```
+
+This shows:
+- **Unpacked size**: Actual file size
+- **Packed size**: Compressed size in Git
+- **Date deleted**: When file was removed (or `<present>` if still exists)
+- **Path name**: File location
+
+### Deleted Files Report
+
+Find large files that were deleted but still bloat history:
+
+```bash
+head -20 .git/filter-repo/analysis/path-deleted-sizes.txt
+```
+
+These are prime candidates for removal since they:
+- No longer exist in the current codebase
+- Still take up space in clones
+- Slow down clone operations
+
+### Extension Analysis
+
+See which file types consume the most space:
+
+```bash
+cat .git/filter-repo/analysis/extensions-all-sizes.txt
+```
+
+Example output:
+```
+=== All extensions by reverse accumulated size ===
+   1.2 GiB  600 MiB  .bin
+   800 MiB  400 MiB  .mp4
+   500 MiB  250 MiB  .zip
+   100 MiB   50 MiB  .js
+```
+
+This helps identify:
+- Binary files that shouldn't be in Git
+- Large media files better suited for Git LFS
+- Compressed files that could be removed
+
+### Directory Size Report
+
+```bash
+head -20 .git/filter-repo/analysis/directories-all-sizes.txt
+```
+
+Identifies which directories contribute most to repository size.
+
+## Acting on Analysis Results
+
+Once you've analyzed your repository, you can clean it up:
+
+### Remove large deleted files
+
+<Steps>
+  <Step title="Identify files to remove">
+    Review deleted files:
+    ```bash
+    head -20 .git/filter-repo/analysis/path-deleted-sizes.txt
+    ```
+  </Step>
+
+  <Step title="Create removal list">
+    Create `../files-to-remove.txt` with paths of files to delete:
+    ```
+    old/large-backup.zip
+    data/old-dataset.csv
+    build/artifacts.tar.gz
+    ```
+  </Step>
+
+  <Step title="Remove the files">
+    ```bash
+    git filter-repo --invert-paths --paths-from-file ../files-to-remove.txt
+    ```
+  </Step>
+</Steps>
+
+### Remove files by extension
+
+Remove all files of a certain type:
+
+```bash
+# Remove all .zip files
+git filter-repo --invert-paths --path-glob '*.zip'
+
+# Remove all binaries
+git filter-repo --invert-paths --path-glob '*.bin' --path-glob '*.exe'
+```
+
+### Remove large directories
+
+```bash
+# Remove a bloated directory
+git filter-repo --invert-paths --path node_modules/
+```
+
+## Advanced Analysis Techniques
+
+### Find duplicate files
+
+The `blob-shas-and-paths.txt` report shows all blob hashes. Look for identical hashes:
+
+```bash
+# Find blobs with multiple paths (potential duplicates)
+awk '{print $1}' .git/filter-repo/analysis/blob-shas-and-paths.txt | \
+    sort | uniq -c | sort -rn | head -20
+```
+
+### Track file renames
+
+The `renames.txt` report shows file rename history:
+
+```bash
+cat .git/filter-repo/analysis/renames.txt
+```
+
+Example output:
+```
+old-name.js -> new-name.js
+src/component.tsx -> lib/ui/component.tsx
+```
+
+### Analyze by time period
+
+Combine analysis with Git log to find when large files were added:
+
+```bash
+# Find when large files were added
+for file in $(head -10 .git/filter-repo/analysis/path-deleted-sizes.txt | \
+             awk '{print $4}'); do
+    echo "=== $file ==="
+    git log --all --full-history --format="%ai %an" -- "$file" | tail -1
+done
+```
+
+## Continuous Monitoring
+
+### Pre-commit checks
+
+Prevent large files from being committed:
+
+```bash
+# .git/hooks/pre-commit
+#!/bin/bash
+MAX_SIZE=10485760  # 10MB
+
+for file in $(git diff --cached --name-only); do
+    if [ -f "$file" ]; then
+        size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+        if [ $size -gt $MAX_SIZE ]; then
+            echo "Error: $file is larger than 10MB"
+            exit 1
+        fi
+    fi
+done
+```
+
+### Regular analysis
+
+Run analysis periodically to catch bloat early:
+
+```bash
+#!/bin/bash
+# analyze-repo.sh
+
+git clone --bare https://github.com/example/repo.git repo-analysis
+cd repo-analysis
+git filter-repo --analyze
+cat .git/filter-repo/analysis/path-all-sizes.txt | head -20
+```
+
+## Interpreting Size Differences
+
+### Unpacked vs Packed Size
+
+- **Unpacked**: Actual file size on disk
+- **Packed**: Compressed size in Git objects
+- Large difference indicates good compression
+- Small difference suggests already-compressed files (zip, jpg, etc.)
+
+### Current vs Historical Size
+
+Compare current repository size to historical:
+
+```bash
+# Current repository size
+du -sh .
+
+# Total historical size (from analysis)
+grep 'All paths' .git/filter-repo/analysis/path-all-sizes.txt -A 1
+```
+
+Large discrepancy indicates deleted files still bloating history.
+
+## Example: Complete Repository Audit
+
+<Steps>
+  <Step title="Run analysis">
+    ```bash
+    git clone https://github.com/example/repo.git
+    cd repo
+    git filter-repo --analyze
+    ```
+  </Step>
+
+  <Step title="Generate summary report">
+    ```bash
+    echo "=== TOP 10 LARGEST FILES ==="
+    head -11 .git/filter-repo/analysis/path-all-sizes.txt
+    
+    echo ""
+    echo "=== TOP 10 DELETED FILES ==="
+    head -11 .git/filter-repo/analysis/path-deleted-sizes.txt
+    
+    echo ""
+    echo "=== SIZE BY EXTENSION ==="
+    head -11 .git/filter-repo/analysis/extensions-all-sizes.txt
+    
+    echo ""
+    echo "=== LARGEST DIRECTORIES ==="
+    head -11 .git/filter-repo/analysis/directories-all-sizes.txt
+    ```
+  </Step>
+
+  <Step title="Identify cleanup targets">
+    Based on the reports:
+    - Large deleted files: Remove from history
+    - Binary files: Consider Git LFS
+    - Build artifacts: Should be in .gitignore
+    - Old dependencies: Safe to remove
+  </Step>
+
+  <Step title="Plan cleanup">
+    Create a cleanup plan:
+    ```
+    1. Remove all .zip files (build artifacts)
+    2. Remove data/*.bin (old datasets)
+    3. Remove node_modules/ from history
+    4. Move large media files to Git LFS
+    ```
+  </Step>
+</Steps>
+
+## Best Practices
+
+1. **Run analysis before filtering**: Always analyze before making changes
+2. **Keep reports**: Save analysis reports for historical reference
+3. **Focus on deleted files**: Biggest wins come from removing deleted large files
+4. **Check extensions**: Identify file types that shouldn't be in Git
+5. **Compare before/after**: Run analysis again after cleanup to verify
+
+## Troubleshooting Analysis
+
+### Analysis is slow
+
+For very large repositories:
+
+```bash
+# Analyze only recent history
+git filter-repo --analyze --refs HEAD~1000..HEAD
+
+# Analyze specific branches
+git filter-repo --analyze --refs main develop
+```
+
+### Reports are too large
+
+Filter reports to focus on significant files:
+
+```bash
+# Only files larger than 1MB
+awk '$2 > 1048576' .git/filter-repo/analysis/path-all-sizes.txt
+```
+
+### Missing expected files
+
+Ensure you're analyzing all branches:
+
+```bash
+# Analyze all refs (default)
+git filter-repo --analyze
+
+# Explicitly analyze all branches and tags
+git filter-repo --analyze --refs --all
+```

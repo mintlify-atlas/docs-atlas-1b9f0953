@@ -1,0 +1,291 @@
+---
+title: 'Path Renaming Options'
+description: 'Options for renaming files, directories, and organizing repository structure'
+---
+
+# Path Renaming Options
+
+Path renaming options allow you to restructure your repository by renaming or moving files and directories throughout history.
+
+<Warning>
+Path renaming does NOT select paths - it only renames paths that are selected by filter options. You need both filter AND rename options for most use cases.
+</Warning>
+
+## Basic Path Renaming
+
+### --path-rename
+
+<ParamField path="--path-rename" type="string">
+  Rename paths matching OLD_NAME to NEW_NAME.
+  
+  **Format:** `OLD_NAME:NEW_NAME`
+  
+  **Aliases:** `--path-rename-match`
+  
+  **Multiple:** Yes - can be specified multiple times
+  
+  **Applies to:** Both files and directories
+  
+  **Trailing slashes:** Optional for directories
+  
+  **Basic examples:**
+  ```bash
+  # Rename a directory
+  git filter-repo --path-rename old-dir/:new-dir/
+  
+  # Rename a file
+  git filter-repo --path-rename old-name.txt:new-name.txt
+  
+  # Move to subdirectory
+  git filter-repo --path-rename src/:lib/src/
+  
+  # Move from subdirectory to root
+  git filter-repo --path-rename subdir/file.txt:file.txt
+  ```
+</ParamField>
+
+## Rename Patterns
+
+### Moving to Root
+
+```bash
+# Make subdirectory the new root
+git filter-repo --path-rename mysubdir/:
+```
+
+The colon (`:`) with nothing after it means "move to root".
+
+### Moving from Root
+
+```bash
+# Move everything to a subdirectory
+git filter-repo --path-rename :newsubdir/
+```
+
+The colon (`:`) with nothing before it means "apply to root".
+
+### Multiple Renames
+
+```bash
+# Rename and merge multiple directories
+git filter-repo \
+  --path-rename cmds/:tools/ \
+  --path-rename src/scripts/:tools/
+```
+
+Both `cmds/` and `src/scripts/` are renamed to `tools/`.
+
+### Handling Collisions
+
+If renaming causes path collisions, rename one first:
+
+```bash
+# Avoid collision by renaming one file differently
+git filter-repo \
+  --path-rename cmds/run.sh:tools/do_release.sh \
+  --path-rename cmds/:tools/ \
+  --path-rename src/scripts/:tools/
+```
+
+## Common Use Cases
+
+### Extract Subdirectory as Project Root
+
+**Using shortcut:**
+```bash
+git filter-repo --subdirectory-filter mysubdir/
+```
+
+**Equivalent long form:**
+```bash
+git filter-repo --path mysubdir/ --path-rename mysubdir/:
+```
+
+### Move Project to Subdirectory
+
+**Using shortcut:**
+```bash
+git filter-repo --to-subdirectory-filter myproject/
+```
+
+**Equivalent long form:**
+```bash
+git filter-repo --path-rename :myproject/
+```
+
+<Note>
+The long form requires understanding that `:` means root level.
+</Note>
+
+### Merge Two Directories
+
+```bash
+git filter-repo --path-rename old-api/:api/ --path-rename new-api/:api/
+```
+
+Both directories are merged into `api/`.
+
+### Reorganize Directory Structure
+
+```bash
+git filter-repo \
+  --path-rename src/:lib/ \
+  --path-rename tests/:test/ \
+  --path-rename doc/:docs/
+```
+
+### Rename and Filter
+
+```bash
+# Keep only two directories and rename them
+git filter-repo \
+  --path src/main/ \
+  --path src/utils/ \
+  --path-rename src/main/:app/ \
+  --path-rename src/utils/:lib/
+```
+
+<Warning>
+**Order matters!** Filters must select paths in their FINAL names after renames:
+
+```bash
+# Correct - filter uses final name
+git filter-repo --path-rename old/:new/ --path new/
+
+# Wrong - new/ doesn't exist when filter runs
+git filter-repo --path new/ --path-rename old/:new/
+```
+</Warning>
+
+## Advanced Renaming
+
+### Conditional Renaming with Callbacks
+
+For complex renaming logic, use `--filename-callback`:
+
+```bash
+git filter-repo --filename-callback '
+  if filename.startswith(b"old/"):
+    return b"new/" + filename[4:]
+  return filename
+'
+```
+
+[Learn more about callbacks →](/api/python-callbacks)
+
+### Regex-Based Renaming
+
+Use `--paths-from-file` with regex for pattern-based renaming:
+
+**Create paths.txt:**
+```
+regex:^old-(.*)/==new-\1/
+regex:^src/v([0-9]+)/==src/version-\1/
+```
+
+**Apply renames:**
+```bash
+git filter-repo --paths-from-file paths.txt
+```
+
+## Handling Special Cases
+
+### Renamed Files in History
+
+If a file was renamed during repository history:
+
+```bash
+# Include both old and new names
+git filter-repo \
+  --path oldname.txt \
+  --path newname.txt \
+  --path-rename oldname.txt:unified.txt \
+  --path-rename newname.txt:unified.txt
+```
+
+### Case-Only Renames
+
+```bash
+# Rename with only case change
+git filter-repo --path-rename README.md:readme.md
+```
+
+<Note>
+On case-insensitive filesystems (Windows, macOS), you may need to use a temporary intermediate name.
+</Note>
+
+### Wildcard Alternatives
+
+Since `--path-rename` doesn't support wildcards directly, use `--filename-callback`:
+
+```bash
+# Rename all .txt files to .md
+git filter-repo --filename-callback '
+  if filename.endswith(b".txt"):
+    return filename[:-4] + b".md"
+  return filename
+'
+```
+
+## Important Considerations
+
+### Path Filtering vs Path Renaming
+
+<Tip>
+**Path renaming does NOT filter!**
+
+This is empty (no paths selected):
+```bash
+git filter-repo --path-rename old/:new/
+```
+
+This works (paths explicitly selected):
+```bash
+git filter-repo --path old/ --path-rename old/:new/
+```
+</Tip>
+
+### Rename Processing Order
+
+Renames are applied in the order specified:
+
+```bash
+# Source -> Intermediate -> Final
+git filter-repo \
+  --path-rename sources/:intermediate/ \
+  --path-rename intermediate/:final/
+```
+
+The result is `sources/` → `final/`
+
+### Incompatibility with --use-base-name
+
+```bash
+# This will ERROR
+git filter-repo --use-base-name --path-rename old/:new/
+```
+
+`--use-base-name` and `--path-rename` cannot be used together.
+
+## Verification
+
+After renaming, verify the results:
+
+```bash
+# Check structure of resulting history
+git ls-tree -r --name-only HEAD
+
+# Verify specific files exist
+git log --all --name-only -- new-path/
+
+# Compare before/after
+git filter-repo --analyze  # Before
+# ... perform filtering ...
+git filter-repo --analyze  # After
+```
+
+## See Also
+
+- [Path Options →](/api/path-options) - Path filtering
+- [CLI Overview →](/api/cli-overview) - All command options
+- [Examples →](/use-cases/path-renaming) - Restructuring examples

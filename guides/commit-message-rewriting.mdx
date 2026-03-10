@@ -1,0 +1,507 @@
+---
+title: 'Commit Message Rewriting'
+description: 'Modify commit and tag messages throughout repository history'
+---
+
+## Overview
+
+Commit message rewriting allows you to fix typos, update references, add metadata, or standardize formatting across your entire repository history.
+
+## Replace Text in Messages
+
+### Basic Replacement
+
+Replace text in commit and tag messages:
+
+<Tabs>
+  <Tab title="Create expressions.txt">
+    ```text
+    # Fix typo
+    teh==>the
+    recieve==>receive
+    
+    # Update project name
+    old-project-name==>new-project-name
+    
+    # Fix issue tracker references
+    bug#==>issue#
+    ```
+  </Tab>
+  <Tab title="Run filter-repo">
+    ```bash
+    git filter-repo --replace-message expressions.txt
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+`--replace-message` uses the same syntax as `--replace-text`, but only applies to commit and tag messages, not file contents.
+</Note>
+
+### Replacement Syntax
+
+Supports literal text, globs, and regex:
+
+<CodeGroup>
+```text Literal
+# Simple text replacement
+foo==>bar
+OldCo==>NewCo
+```
+
+```text Glob
+# Remove any line containing "TODO"
+glob:*TODO*==>
+```
+
+```text Regex
+# Convert issue references
+regex:#(\d+)==>GH-\1
+
+# Add period to end of commit messages
+regex:([^.])$==>
+\1.
+```
+</CodeGroup>
+
+## Using Message Callback
+
+### Add Metadata
+
+Add Signed-off-by or other metadata:
+
+```bash
+git filter-repo --message-callback '
+  # Add Signed-off-by if missing
+  if b"Signed-off-by:" not in message:
+    message += b"\n\nSigned-off-by: John Doe <john@example.com>"
+  return message
+'
+```
+
+### Fix Formatting
+
+Standardize commit message format:
+
+```bash
+git filter-repo --message-callback '
+  lines = message.split(b"\n")
+  
+  # Ensure first line is capitalized
+  if lines and len(lines[0]) > 0:
+    lines[0] = lines[0][0:1].upper() + lines[0][1:]
+  
+  # Remove trailing whitespace from all lines
+  lines = [line.rstrip() for line in lines]
+  
+  # Ensure blank line between subject and body
+  if len(lines) > 1 and lines[1] != b"":
+    lines.insert(1, b"")
+  
+  return b"\n".join(lines)
+'
+```
+
+### Update Issue References
+
+Convert between issue tracking systems:
+
+```bash
+git filter-repo --message-callback '
+  # Convert #123 to JIRA-123
+  message = re.sub(b"#(\\d+)", b"JIRA-\\1", message)
+  
+  # Convert "Fixes #123" to "Closes JIRA-123"
+  message = re.sub(b"Fixes #(\\d+)", b"Closes JIRA-\\1", message)
+  
+  return message
+'
+```
+
+## Rewriting Commit Hashes
+
+### Automatic Hash Updates
+
+By default, git-filter-repo updates commit hash references in messages:
+
+```bash
+# Before filtering:
+"Reverts commit abc123def"
+
+# After filtering (if abc123def was rewritten to xyz789abc):
+"Reverts commit xyz789abc"
+```
+
+<Note>
+**Automatic hash rewriting:**
+- Preserves abbreviated hash length
+- Only updates hashes of commits being rewritten
+- Skips hashes that don't exist or were pruned
+</Note>
+
+### Disable Hash Rewriting
+
+Prevent automatic hash updates:
+
+```bash
+git filter-repo --preserve-commit-hashes \
+  --replace-message expressions.txt
+```
+
+<Warning>
+Disabling hash rewriting means commit references in messages will be incorrect after filtering.
+</Warning>
+
+## Encoding Handling
+
+### Default Behavior
+
+By default, git-filter-repo re-encodes commit messages to UTF-8:
+
+```bash
+# Commit with encoding=iso-8859-1 will be converted to UTF-8
+git filter-repo ...
+```
+
+### Preserve Original Encoding
+
+Keep commit message encodings unchanged:
+
+```bash
+git filter-repo --preserve-commit-encoding \
+  --replace-message expressions.txt
+```
+
+<Note>
+If a commit message isn't valid in its specified encoding, git won't re-encode it (it will leave both the message and encoding header unchanged).
+</Note>
+
+## Complex Examples
+
+### Standardize Commit Format
+
+Enforce Conventional Commits format:
+
+```bash
+git filter-repo --message-callback '
+  lines = message.split(b"\n")
+  if not lines:
+    return message
+  
+  subject = lines[0]
+  
+  # Add type if missing
+  if not re.match(b"^(feat|fix|docs|style|refactor|test|chore):", subject):
+    # Guess type based on content
+    if b"test" in subject.lower():
+      subject = b"test: " + subject
+    elif b"doc" in subject.lower():
+      subject = b"docs: " + subject
+    elif b"fix" in subject.lower():
+      subject = b"fix: " + subject
+    else:
+      subject = b"chore: " + subject
+    
+    lines[0] = subject
+  
+  return b"\n".join(lines)
+'
+```
+
+### Add Issue Links
+
+Automatically link to issue tracker:
+
+```bash
+git filter-repo --message-callback '
+  # Convert "Fixes #123" to "Fixes #123\nSee: https://github.com/user/repo/issues/123"
+  def add_link(match):
+    issue = match.group(1)
+    url = b"https://github.com/user/repo/issues/" + issue
+    return match.group(0) + b"\nSee: " + url
+  
+  message = re.sub(
+    b"(Fixes|Closes|Resolves) #(\\d+)",
+    add_link,
+    message
+  )
+  
+  return message
+'
+```
+
+### Remove Sensitive Information
+
+Redact sensitive data from commit messages:
+
+```bash
+cat > redact.txt <<EOF
+# Remove passwords
+regex:password\s*[:=]\s*\S+==>[REDACTED]
+
+# Remove API keys  
+regex:api[_-]?key\s*[:=]\s*\S+==>[REDACTED]
+
+# Remove emails
+regex:[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}==>[EMAIL]
+EOF
+
+git filter-repo --replace-message redact.txt
+```
+
+### Prefix All Commits
+
+Add a prefix to all commit messages:
+
+```bash
+git filter-repo --message-callback '
+  prefix = b"[LEGACY] "
+  if not message.startswith(prefix):
+    message = prefix + message
+  return message
+'
+```
+
+### Clean Up Merge Messages
+
+Standardize merge commit messages:
+
+```bash
+git filter-repo --commit-callback '
+  # Only process merge commits
+  if len(commit.parents) <= 1:
+    return
+  
+  # Standardize merge message format
+  lines = commit.message.split(b"\n")
+  if lines[0].startswith(b"Merge "):
+    # Extract branch name if possible
+    match = re.search(b"Merge branch \'([^\']+)\'", lines[0])
+    if match:
+      branch = match.group(1)
+      commit.message = b"Merge branch %s\n\nMerged %s into current branch." % (branch, branch)
+'
+```
+
+## Tag Messages
+
+### Modify Tag Messages
+
+Tag messages are modified with `--replace-message` too:
+
+```bash
+git filter-repo --replace-message expressions.txt
+```
+
+Or use `--tag-callback` for more control:
+
+```bash
+git filter-repo --tag-callback '
+  # Add release notes link
+  tag.message += b"\n\nRelease notes: https://example.com/releases/" + tag.ref
+'
+```
+
+### Add Tag Metadata
+
+```bash
+git filter-repo --tag-callback '
+  if tag.tagger_name:
+    tag.message += b"\n\nTagged by %s <%s> on %s" % (
+      tag.tagger_name,
+      tag.tagger_email,
+      tag.tagger_date
+    )
+'
+```
+
+## Multi-Line Messages
+
+### Format Multi-Line Messages
+
+Handle messages with multiple paragraphs:
+
+```bash
+git filter-repo --message-callback '
+  lines = message.split(b"\n")
+  
+  # Capitalize first line
+  if lines:
+    lines[0] = lines[0].capitalize()
+  
+  # Wrap long lines in body (after blank line)
+  result = []
+  in_body = False
+  
+  for line in lines:
+    if not line.strip():
+      in_body = True
+      result.append(line)
+    elif in_body and len(line) > 72:
+      # Simple word wrap
+      words = line.split()
+      current = b""
+      for word in words:
+        if len(current) + len(word) + 1 > 72:
+          result.append(current)
+          current = word
+        else:
+          current += b" " + word if current else word
+      if current:
+        result.append(current)
+    else:
+      result.append(line)
+  
+  return b"\n".join(result)
+'
+```
+
+## Common Patterns
+
+### Fix Common Typos
+
+```text typos.txt
+regex:\bteh\b==>the
+regex:\brecieve\b==>receive
+regex:\boccured\b==>occurred
+regex:\bseperate\b==>separate
+regex:\bdefinately\b==>definitely
+```
+
+```bash
+git filter-repo --replace-message typos.txt
+```
+
+### Update Project URLs
+
+```text urls.txt
+http://old-site.com==>https://new-site.com
+github.com/olduser/repo==>github.com/newuser/repo
+```
+
+```bash
+git filter-repo --replace-message urls.txt
+```
+
+### Remove Debug Messages
+
+```bash
+git filter-repo --message-callback '
+  # Remove lines starting with DEBUG:
+  lines = message.split(b"\n")
+  lines = [l for l in lines if not l.startswith(b"DEBUG:")]
+  return b"\n".join(lines)
+'
+```
+
+### Add Co-authored-by
+
+Add co-authors based on commit content:
+
+```bash
+git filter-repo --commit-callback '
+  # Add co-author if commit touches certain directories
+  touched_dirs = set()
+  for change in commit.file_changes:
+    if change.filename.startswith(b"frontend/"):
+      touched_dirs.add(b"frontend")
+    elif change.filename.startswith(b"backend/"):
+      touched_dirs.add(b"backend")
+  
+  # Add co-authors
+  if b"frontend" in touched_dirs:
+    if b"Co-authored-by: Frontend Dev" not in commit.message:
+      commit.message += b"\nCo-authored-by: Frontend Dev <fe@example.com>"
+  
+  if b"backend" in touched_dirs:
+    if b"Co-authored-by: Backend Dev" not in commit.message:
+      commit.message += b"\nCo-authored-by: Backend Dev <be@example.com>"
+'
+```
+
+## Limitations
+
+<Warning>
+**Hash Rewriting Limitations**
+
+Commit hashes in messages won't be updated if:
+- The hash doesn't exist in the repository
+- The commit was pruned during filtering
+- The abbreviated hash isn't unique
+- You used `--preserve-commit-hashes`
+
+Suboptimal cases are logged to `.git/filter-repo/suboptimal-issues`
+</Warning>
+
+<Note>
+**Binary Data**
+
+Commit messages are bytes, not strings. Always use:
+- `b"text"` for literals
+- `.split(b"\n")` for line splitting
+- `b"".join()` for joining
+</Note>
+
+## Testing Changes
+
+### Preview with --dry-run
+
+```bash
+git filter-repo --dry-run \
+  --replace-message expressions.txt
+```
+
+This saves filtered output to files for inspection without modifying the repository.
+
+### Test on Single Branch
+
+```bash
+git filter-repo --refs test-branch \
+  --message-callback '...'
+```
+
+### Verify Results
+
+Check commit messages after filtering:
+
+```bash
+# View all commit messages
+git log --all --oneline
+
+# Search for specific text
+git log --all --grep="search term"
+
+# Check a specific commit
+git show COMMIT_HASH
+```
+
+## Best Practices
+
+<Tip>
+**Testing Strategy**
+
+1. Test on a small branch first
+2. Use `--dry-run` for complex operations
+3. Run `--analyze` before and after to compare
+4. Search for patterns you're trying to remove
+5. Check edge cases (empty messages, very long messages)
+</Tip>
+
+<Tip>
+**Preserve History**
+
+Before running:
+```bash
+# Make a backup branch
+git branch backup-before-filter
+
+# Or make a backup clone
+git clone --no-local . ../backup-repo
+```
+</Tip>
+
+## Next Steps
+
+- Learn about [Advanced Filtering](/guides/advanced-filtering) for complex callbacks
+- Explore [Library Usage](/guides/library-usage) for programmatic control
+- See [Basic Filtering](/guides/basic-filtering) for path operations

@@ -1,0 +1,204 @@
+---
+title: 'Command Line API Overview'
+description: 'Overview and categorization of all git-filter-repo command-line options'
+---
+
+# Command Line API Overview
+
+git-filter-repo provides a comprehensive set of command-line options for rewriting repository history. This page categorizes all available options by their purpose.
+
+## Usage Synopsis
+
+```bash
+git filter-repo --analyze
+git filter-repo [<path_filtering_options>] [<content_filtering_options>]
+	[<ref_renaming_options>] [<commit_message_filtering_options>]
+	[<name_or_email_filtering_options>] [<parent_rewriting_options>]
+	[<generic_callback_options>] [<miscellaneous_options>]
+```
+
+## Option Categories
+
+### Analysis Options
+
+Options for analyzing repository history without making modifications:
+
+- `--analyze` - Generate reports about repository contents
+- `--report-dir` - Specify directory for analysis reports
+
+[Learn more →](/api/cli-overview#analysis-options)
+
+### Path Filtering Options
+
+Options for selecting which files/directories to include or exclude:
+
+- `--path`, `--path-match` - Exact path matching
+- `--path-glob` - Glob pattern matching
+- `--path-regex` - Regular expression matching
+- `--invert-paths` - Invert path selection
+- `--use-base-name` - Match on basename only
+- `--paths-from-file` - Load path specifications from file
+- `--subdirectory-filter` - Extract subdirectory as project root
+- `--to-subdirectory-filter` - Move project root to subdirectory
+
+[Learn more →](/api/path-options)
+
+### Path Renaming Options
+
+Options for renaming files and directories:
+
+- `--path-rename`, `--path-rename-match` - Rename paths
+
+[Learn more →](/api/rename-options)
+
+### Content Editing Options
+
+Options for modifying file contents:
+
+- `--replace-text` - Replace text patterns in files
+- `--strip-blobs-bigger-than` - Remove large files
+- `--strip-blobs-with-ids` - Remove specific blob objects
+
+[Learn more →](/api/content-options)
+
+### Commit Message Options
+
+Options for modifying commit messages:
+
+- `--replace-message` - Replace text in commit/tag messages
+- `--preserve-commit-hashes` - Don't update commit hash references
+- `--preserve-commit-encoding` - Don't re-encode messages to UTF-8
+
+[Learn more →](/api/commit-options)
+
+### Name & Email Filtering Options
+
+Options for rewriting author/committer information:
+
+- `--mailmap` - Apply mailmap file for name/email translation
+- `--use-mailmap` - Use .mailmap from repository
+
+[Learn more →](/api/commit-options#names-and-emails)
+
+### Ref Renaming Options
+
+Options for renaming branches and tags:
+
+- `--tag-rename` - Rename tags by prefix
+
+[Learn more →](/api/ref-options)
+
+### Parent Rewriting Options
+
+Options controlling how commit ancestry is modified:
+
+- `--replace-refs` - Control replace ref handling
+- `--prune-empty` - Control empty commit pruning
+- `--prune-degenerate` - Control degenerate merge pruning
+- `--no-ff` - Preserve merge commit topology
+
+[Learn more →](/api/commit-options#parent-rewriting)
+
+### Generic Callback Options
+
+Options for custom Python code processing:
+
+- `--filename-callback` - Process filenames
+- `--file-info-callback` - Process file metadata and content
+- `--message-callback` - Process commit/tag messages
+- `--name-callback` - Process person names
+- `--email-callback` - Process email addresses
+- `--refname-callback` - Process ref names
+- `--blob-callback` - Process blob objects
+- `--commit-callback` - Process commit objects
+- `--tag-callback` - Process tag objects
+- `--reset-callback` - Process reset objects
+
+[Learn more in Callbacks documentation →](/api/python-callbacks)
+
+### Sensitive Data Removal Options
+
+Options for removing sensitive data:
+
+- `--sensitive-data-removal`, `--sdr` - Enable sensitive data removal mode
+- `--no-fetch` - Skip fetching all refs from origin
+
+### Location Options
+
+Options for specifying source and target repositories:
+
+- `--source` - Source repository to read from
+- `--target` - Target repository to write to
+
+[Learn more →](/api/output-options)
+
+### Ordering Options
+
+Options for controlling commit processing order:
+
+- `--date-order` - Process commits by timestamp order
+
+### Miscellaneous Options
+
+General control options:
+
+- `--help`, `-h` - Show help
+- `--version` - Show version
+- `--force`, `-f` - Skip fresh clone checks
+- `--partial` - Partial history rewrite
+- `--refs` - Limit to specific refs
+- `--dry-run` - Preview changes without applying
+- `--debug` - Show debug information
+- `--stdin` - Read fast-export stream from stdin
+- `--quiet` - Suppress output
+- `--no-gc` - Skip garbage collection
+
+[Learn more →](/api/output-options)
+
+## Quick Reference
+
+### Most Common Operations
+
+**Filter to specific paths:**
+```bash
+git filter-repo --path src/ --path docs/
+```
+
+**Remove large files:**
+```bash
+git filter-repo --strip-blobs-bigger-than 10M
+```
+
+**Rename directories:**
+```bash
+git filter-repo --path-rename old-name/:new-name/
+```
+
+**Replace sensitive text:**
+```bash
+git filter-repo --replace-text expressions.txt
+```
+
+**Extract subdirectory:**
+```bash
+git filter-repo --subdirectory-filter mysubdir/
+```
+
+## Combining Options
+
+Multiple options can be combined for complex filtering operations:
+
+```bash
+git filter-repo \
+  --path src/ \
+  --path-rename src/:lib/ \
+  --replace-text secrets.txt \
+  --strip-blobs-bigger-than 5M
+```
+
+## Next Steps
+
+- [Path Options →](/api/path-options) - Detailed path filtering documentation
+- [Content Options →](/api/content-options) - Content modification options
+- [Commit Options →](/api/commit-options) - Commit-related options
+- [Examples →](/examples/cheat-sheet) - Real-world usage examples

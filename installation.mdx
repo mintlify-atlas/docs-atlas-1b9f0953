@@ -1,0 +1,257 @@
+---
+title: Installation
+description: Learn how to install git-filter-repo on your system
+---
+
+## Prerequisites
+
+Before installing git-filter-repo, ensure you have:
+
+- **Git** >= 2.36.0
+- **Python** >= 3.6
+
+You can verify your versions with:
+
+```bash
+git --version
+python3 --version
+```
+
+## Installation Methods
+
+<Tabs>
+  <Tab title="Simple (Recommended)">
+    The simplest way to install git-filter-repo is to download the single Python script.
+
+    <Steps>
+      <Step title="Download the script">
+        Download the `git-filter-repo` script from the repository:
+
+        ```bash
+        curl -o git-filter-repo https://raw.githubusercontent.com/newren/git-filter-repo/main/git-filter-repo
+        ```
+
+        <Note>
+          Make sure to preserve the filename as `git-filter-repo` with no extension.
+        </Note>
+      </Step>
+
+      <Step title="Make it executable">
+        ```bash
+        chmod +x git-filter-repo
+        ```
+      </Step>
+
+      <Step title="Run the tool">
+        You can now run it directly:
+
+        ```bash
+        python3 git-filter-repo --analyze
+        ```
+
+        Or place it in your `$PATH` to use the shorter syntax:
+
+        ```bash
+        # Move to a directory in your PATH
+        sudo mv git-filter-repo /usr/local/bin/
+
+        # Now you can run it as:
+        git filter-repo --analyze
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Package Manager">
+    git-filter-repo is available through various package managers across different platforms.
+
+    <AccordionGroup>
+      <Accordion title="macOS (Homebrew)">
+        ```bash
+        brew install git-filter-repo
+        ```
+      </Accordion>
+
+      <Accordion title="Windows (Scoop)">
+        ```bash
+        scoop install git-filter-repo
+        ```
+      </Accordion>
+
+      <Accordion title="Debian/Ubuntu">
+        ```bash
+        sudo apt-get install git-filter-repo
+        ```
+      </Accordion>
+
+      <Accordion title="Fedora">
+        ```bash
+        sudo dnf install git-filter-repo
+        ```
+      </Accordion>
+
+      <Accordion title="Arch Linux">
+        ```bash
+        sudo pacman -S git-filter-repo
+        ```
+      </Accordion>
+    </AccordionGroup>
+
+    <Info>
+      For a complete list of available packages, see [Repology](https://repology.org/project/git-filter-repo/versions).
+    </Info>
+  </Tab>
+
+  <Tab title="PyPI (pipx/uv)">
+    Install git-filter-repo as a Python package using pipx or uv tool.
+
+    <CodeGroup>
+      ```bash pipx
+      pipx install git-filter-repo
+      ```
+
+      ```bash uv
+      uv tool install git-filter-repo
+      ```
+    </CodeGroup>
+
+    <Note>
+      Using pipx or uv tool is recommended over pip to avoid conflicts with system Python packages.
+    </Note>
+  </Tab>
+
+  <Tab title="Makefile">
+    For manual installation with full control over paths:
+
+    <Steps>
+      <Step title="Clone the repository">
+        ```bash
+        git clone https://github.com/newren/git-filter-repo.git
+        cd git-filter-repo
+        ```
+      </Step>
+
+      <Step title="Get documentation (optional)">
+        If installing from a git clone, you may want the documentation:
+
+        ```bash
+        make snag_docs
+        ```
+
+        This copies the generated documentation files from the `docs` branch.
+      </Step>
+
+      <Step title="Install with make">
+        ```bash
+        sudo make prefix=/usr pythondir=/usr/lib64/python3.8/site-packages install
+        ```
+
+        Replace the `pythondir` value with your Python site-packages directory. Find it with:
+
+        ```bash
+        python3 -c "import site; print(site.getsitepackages())"
+        ```
+      </Step>
+    </Steps>
+
+    <Warning>
+      The Makefile will not edit the shebang line if your Python executable is not named `python3`. You'll need to manually edit the first line of `git-filter-repo` if needed.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Advanced Installation (For Library Use)
+
+If you want to use git-filter-repo as a Python library or use contrib scripts:
+
+<Steps>
+  <Step title="Create git_filter_repo.py">
+    Create a symlink or copy of `git-filter-repo` named `git_filter_repo.py`:
+
+    ```bash
+    ln -s git-filter-repo git_filter_repo.py
+    # or
+    cp git-filter-repo git_filter_repo.py
+    ```
+  </Step>
+
+  <Step title="Place in Python path">
+    Place `git_filter_repo.py` in your Python site-packages or anywhere in `$PYTHONPATH`:
+
+    ```bash
+    SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    sudo cp git_filter_repo.py $SITE_PACKAGES/
+    ```
+  </Step>
+</Steps>
+
+## Platform-Specific Notes
+
+<Accordion title="Windows Users">
+  Windows can present some unique challenges:
+
+  ### Non-functional Python Stub
+  Windows sometimes ships with a [non-functional Python stub](https://github.com/newren/git-filter-repo/issues/36) that can cause the application to hang. Install Python from the [Microsoft Store](https://apps.microsoft.com/store/search?publisher=Python%20Software%20Foundation).
+
+  ### Python Executable Name
+  If your Python executable is named `python` instead of `python3`, you have two options:
+
+  1. Edit the first line of `git-filter-repo` to use `python` instead of `python3`
+  2. Use the full form in commands: `python git-filter-repo` instead of `git filter-repo`
+
+  ### Symlink Issues
+  If `git_filter_repo.py` appears as a regular file with just one line instead of a proper symlink, delete it and create a copy instead:
+
+  ```bash
+  del git_filter_repo.py
+  copy git-filter-repo git_filter_repo.py
+  ```
+</Accordion>
+
+## Verification
+
+Verify your installation by running:
+
+```bash
+git filter-repo --version
+```
+
+Or display the help:
+
+```bash
+git filter-repo -h
+```
+
+## What Gets Installed
+
+A complete installation includes:
+
+<CardGroup cols={2}>
+  <Card title="git-filter-repo" icon="python">
+    The main executable script. **Required** for all use cases.
+  </Card>
+  
+  <Card title="git_filter_repo.py" icon="book">
+    Python library module. Optional, needed for using filter-repo as a library.
+  </Card>
+  
+  <Card title="git-filter-repo.1" icon="file-lines">
+    Man page. Optional, enables `git filter-repo --help` on Linux/Mac.
+  </Card>
+  
+  <Card title="git-filter-repo.html" icon="globe">
+    HTML documentation. Optional, enables `git filter-repo --help` on Windows.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Try your first repository filtering
+  </Card>
+  
+  <Card title="Analyzing Repositories" icon="chart-line" href="/use-cases/analyzing-repository">
+    Analyze your repo to decide what to filter
+  </Card>
+</CardGroup>

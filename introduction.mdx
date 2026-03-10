@@ -1,0 +1,136 @@
+---
+title: Introduction
+description: Fast, powerful tool for rewriting git repository history
+---
+
+<div style={{ 
+  background: 'linear-gradient(135deg, #E94B27 0%, #fa4c2a 100%)',
+  borderRadius: '6px',
+  padding: '48px 32px',
+  marginBottom: '32px',
+  color: '#ffffff'
+}}>
+  <h1 style={{ 
+    fontSize: '36px', 
+    fontWeight: 700, 
+    marginBottom: '16px',
+    color: '#ffffff'
+  }}>
+    git-filter-repo
+  </h1>
+  <p style={{ 
+    fontSize: '20px', 
+    marginBottom: 0,
+    color: '#ffffff',
+    opacity: 0.95
+  }}>
+    Quickly rewrite git repository history (filter-branch replacement)
+  </p>
+</div>
+
+git-filter-repo is a versatile tool for rewriting history, which includes capabilities not found anywhere else. It roughly falls into the same space as [git filter-branch](https://git-scm.com/docs/git-filter-branch) but without the poor performance, with far more capabilities, and with a design that scales beyond trivial rewriting cases.
+
+<Note>
+git-filter-repo is now [recommended by the git project](https://git-scm.com/docs/git-filter-branch#_warning) instead of git filter-branch.
+</Note>
+
+## Why git-filter-repo?
+
+<CardGroup cols={2}>
+  <Card title="Lightning Fast" icon="bolt">
+    Orders of magnitude faster than filter-branch for non-trivial repositories
+  </Card>
+  <Card title="Powerful Filtering" icon="filter">
+    Path-based filtering, content replacement, commit message rewriting, and more
+  </Card>
+  <Card title="Safe by Design" icon="shield">
+    Detects and requires fresh clones, automatic cleanup, intelligent safety checks
+  </Card>
+  <Card title="Library & CLI" icon="code">
+    Use as a command-line tool or Python library for custom filtering scripts
+  </Card>
+</CardGroup>
+
+## Key Features
+
+- **Fast repository history rewriting** — Multiple orders of magnitude faster than filter-branch
+- **Path-based filtering** — Keep or remove specific paths with simple flags
+- **File and directory renaming** — Easily restructure your repository layout
+- **Repository analysis** — Identify large files and directories before filtering
+- **Commit message rewriting** — Update commit messages with new hashes automatically
+- **Tag renaming and filtering** — Rename or filter tags during the rewrite
+- **Python library API** — Write custom filtering scripts leveraging the core engine
+- **Automatic cleanup** — Repository optimization and cleanup happens automatically
+
+## Use Cases
+
+git-filter-repo excels at common repository maintenance tasks:
+
+<AccordionGroup>
+  <Accordion title="Extract a subdirectory into its own repository">
+    Extract a portion of your repository while preserving history, perfect for splitting monorepos or creating focused repositories.
+  </Accordion>
+  <Accordion title="Remove sensitive data from history">
+    Permanently remove passwords, API keys, or other sensitive data that was accidentally committed.
+  </Accordion>
+  <Accordion title="Reorganize repository structure">
+    Move files and directories around while maintaining full commit history.
+  </Accordion>
+  <Accordion title="Clean up large files">
+    Remove large files that are no longer needed to reduce repository size.
+  </Accordion>
+  <Accordion title="Rewrite commit messages">
+    Update commit messages to reference new commit IDs after filtering.
+  </Accordion>
+</AccordionGroup>
+
+## How It Works
+
+At its core, git-filter-repo works by running:
+
+```bash
+git fast-export <options> | filter | git fast-import <options>
+```
+
+git-filter-repo not only launches this pipeline but also serves as the 'filter' in the middle, and does additional work to make it a well-rounded filtering tool. It provides both a simple command-line interface for common operations and a powerful library for complex custom filtering.
+
+## Prerequisites
+
+Before installing git-filter-repo, ensure you have:
+
+- **Git** >= 2.36.0
+- **Python** >= 3.6
+
+## Quick Example
+
+Here's a simple example that extracts a subdirectory, moves it to a new location, and renames tags:
+
+```bash
+git filter-repo --path src/ --to-subdirectory-filter my-module --tag-rename '':'my-module-'
+```
+
+This single command:
+1. Keeps only files under `src/`
+2. Moves everything into a new `my-module/` directory
+3. Prefixes all tags with `my-module-`
+
+<Note>
+This is just the beginning. git-filter-repo can handle much more complex filtering operations through its command-line options and Python API.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install git-filter-repo on your system
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first filtering operation
+  </Card>
+  <Card title="Command Reference" icon="terminal" href="/api/cli-overview">
+    Explore all command-line options
+  </Card>
+  <Card title="Examples" icon="lightbulb" href="/examples/cheat-sheet">
+    See common filtering patterns
+  </Card>
+</CardGroup>

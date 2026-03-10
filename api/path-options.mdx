@@ -1,0 +1,259 @@
+---
+title: 'Path Filtering Options'
+description: 'Options for selecting and filtering files and directories'
+---
+
+# Path Filtering Options
+
+Path filtering options control which files and directories are included in the filtered repository history.
+
+<Note>
+Renames are NOT automatically followed. If a file or directory was renamed in history, you need to specify both the old and new paths.
+</Note>
+
+## Basic Path Selection
+
+### --path, --path-match
+
+<ParamField path="--path" type="string">
+  Exact path (file or directory) to include in filtered history.
+  
+  **Type:** File or directory path
+  
+  **Multiple:** Yes - can be specified multiple times for union of paths
+  
+  **Example:**
+  ```bash
+  git filter-repo --path src/ --path README.md
+  ```
+  
+  This includes only the `src/` directory and `README.md` file.
+</ParamField>
+
+### --path-glob
+
+<ParamField path="--path-glob" type="string">
+  Glob pattern of paths to include in filtered history.
+  
+  **Type:** Glob pattern
+  
+  **Multiple:** Yes - can be specified multiple times for union of paths
+  
+  **Example:**
+  ```bash
+  git filter-repo --path-glob '*.py' --path-glob 'docs/**/*.md'
+  ```
+  
+  This includes all Python files and all Markdown files in the docs directory.
+  
+  <Note>Use quotes to prevent shell glob expansion</Note>
+</ParamField>
+
+### --path-regex
+
+<ParamField path="--path-regex" type="string">
+  Regular expression of paths to include in filtered history.
+  
+  **Type:** Python regex pattern
+  
+  **Multiple:** Yes - can be specified multiple times for union of paths
+  
+  **Example:**
+  ```bash
+  git filter-repo --path-regex '^src/.*\.(py|js)$'
+  ```
+  
+  This includes Python and JavaScript files in the src directory.
+  
+  <Note>Uses Python regex syntax: https://docs.python.org/3/library/re.html</Note>
+</ParamField>
+
+## Path Selection Modifiers
+
+### --invert-paths
+
+<ParamField path="--invert-paths" type="boolean" default="false">
+  Invert the selection of files from path options.
+  
+  When enabled, only files matching NONE of the path options are selected.
+  
+  **Example:**
+  ```bash
+  git filter-repo --path-glob '*.log' --invert-paths
+  ```
+  
+  This removes all .log files from history.
+</ParamField>
+
+### --use-base-name
+
+<ParamField path="--use-base-name" type="boolean" default="false">
+  Match on file basename instead of full path.
+  
+  **Incompatible with:** `--path-rename`
+  
+  **Cannot match:** Directory names
+  
+  **Example:**
+  ```bash
+  git filter-repo --use-base-name --path README.md
+  ```
+  
+  This includes all README.md files regardless of their directory.
+</ParamField>
+
+## Path Shortcuts
+
+### --paths-from-file
+
+<ParamField path="--paths-from-file" type="string">
+  Specify multiple path filtering and renaming directives from a file.
+  
+  **Format:** One directive per line
+  
+  **Prefixes:**
+  - `literal:` (default) - Exact match
+  - `glob:` - Glob pattern
+  - `regex:` - Regular expression
+  
+  **Renames:** Use `==>` separator
+  
+  **Comments:** Lines starting with `#` are ignored
+  
+  **Example file (paths.txt):**
+  ```
+  # Keep source directories
+  literal:src/
+  literal:tests/
+  
+  # Rename old directory
+  literal:old-name/==>new-name/
+  
+  # Keep all Python files
+  glob:**.py
+  
+  # Keep date-formatted files
+  regex:.*[0-9]{4}-[0-9]{2}-[0-9]{2}\.txt$
+  ```
+  
+  **Usage:**
+  ```bash
+  git filter-repo --paths-from-file paths.txt
+  ```
+</ParamField>
+
+### --subdirectory-filter
+
+<ParamField path="--subdirectory-filter" type="string">
+  Extract a subdirectory and make it the project root.
+  
+  Only history touching the subdirectory is kept, and that directory becomes the new root.
+  
+  **Equivalent to:**
+  ```bash
+  --path DIRECTORY/ --path-rename DIRECTORY/:
+  ```
+  
+  **Example:**
+  ```bash
+  git filter-repo --subdirectory-filter mysubdir/
+  ```
+  
+  Contents of `mysubdir/` become the new repository root.
+</ParamField>
+
+### --to-subdirectory-filter
+
+<ParamField path="--to-subdirectory-filter" type="string">
+  Move the project root into a subdirectory.
+  
+  All files are moved into the specified subdirectory.
+  
+  **Equivalent to:**
+  ```bash
+  --path-rename :DIRECTORY/
+  ```
+  
+  **Example:**
+  ```bash
+  git filter-repo --to-subdirectory-filter myproject/
+  ```
+  
+  All repository contents are moved under `myproject/`.
+</ParamField>
+
+## Usage Examples
+
+### Keep Only Specific Directories
+
+```bash
+git filter-repo --path src/ --path docs/ --path README.md
+```
+
+Keeps only the `src/` and `docs/` directories plus the README file.
+
+### Remove Specific Files
+
+```bash
+git filter-repo --path-glob '*.log' --invert-paths
+```
+
+Removes all log files from repository history.
+
+### Keep Files by Pattern
+
+```bash
+git filter-repo --path-regex '^.*/.*/[0-9]{4}-[0-9]{2}-[0-9]{2}\.txt$'
+```
+
+Keeps only text files with date format YYYY-MM-DD.txt that are at least two subdirectories deep.
+
+### Combined Filtering
+
+```bash
+git filter-repo --path src/main/
+git filter-repo --path-glob 'src/*/data' --invert-paths
+```
+
+First keeps only `src/main/`, then removes any files named `data` under any subdirectory.
+
+<Note>
+Multiple filter-repo runs can be chained for complex filtering scenarios.
+</Note>
+
+## Important Notes
+
+<Warning>
+**Renames are NOT followed automatically**
+
+If you renamed `olddir/` to `newdir/` in commit history, you must specify both:
+```bash
+git filter-repo --path olddir/ --path newdir/
+```
+</Warning>
+
+### Trailing Slashes
+
+Directory names can be specified with or without trailing slashes:
+```bash
+--path src/    # Same as
+--path src     # this
+```
+
+### Processing Order
+
+All path arguments are processed in the order specified. This matters for renames:
+
+```bash
+# Correct - filter selects the final destination
+git filter-repo --path-rename old/:new/ --path new/
+
+# Wrong - new/ doesn't exist yet when filter runs
+git filter-repo --path new/ --path-rename old/:new/
+```
+
+## See Also
+
+- [Rename Options →](/api/rename-options) - Path renaming
+- [Content Options →](/api/content-options) - Content filtering
+- [Examples →](/guides/path-based-filtering) - Real-world examples

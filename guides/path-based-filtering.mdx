@@ -1,0 +1,374 @@
+---
+title: 'Path-Based Filtering'
+description: 'Rename and restructure files and directories in repository history'
+---
+
+## Overview
+
+Path-based filtering allows you to rename files and directories throughout your repository's entire history. This is essential when restructuring projects, merging repositories, or correcting naming conventions.
+
+## Path Renaming Basics
+
+### Simple Rename
+
+Rename a directory throughout history:
+
+```bash
+# Rename tools/ to scripts/
+git filter-repo --path-rename tools/:scripts/
+```
+
+<Note>
+Trailing slashes are optional for directories:
+- `tools/:scripts/` (with slash)
+- `tools:scripts` (without slash)
+
+Both work identically.
+</Note>
+
+### Multiple Renames
+
+Perform several renames in one operation:
+
+```bash
+git filter-repo \
+  --path-rename cmds:tools \
+  --path-rename src/scripts/:tools/
+```
+
+<Warning>
+**Order Matters!**
+
+Renames are applied in the order specified. The command above:
+1. First renames `cmds` → `tools`
+2. Then renames `src/scripts/` → `tools/`
+
+Reversing the order could give different results.
+</Warning>
+
+## Advanced Renaming
+
+### Merge Directories
+
+Rename multiple directories to the same location:
+
+<Tabs>
+  <Tab title="Before">
+    ```
+    cmds/
+      run.sh
+    src/scripts/
+      build.sh
+    tools/
+      deploy.sh
+    ```
+  </Tab>
+  <Tab title="Command">
+    ```bash
+    git filter-repo \
+      --path-rename cmds/:tools/ \
+      --path-rename src/scripts/:tools/
+    ```
+  </Tab>
+  <Tab title="After">
+    ```
+    tools/
+      run.sh
+      build.sh
+      deploy.sh
+    ```
+  </Tab>
+</Tabs>
+
+### Handle Naming Conflicts
+
+If two files would collide when renamed, specify an additional rename:
+
+```bash
+# If both cmds/release.sh and src/scripts/release.sh exist
+git filter-repo \
+  --path-rename cmds/release.sh:tools/old_release.sh \
+  --path-rename cmds/:tools/ \
+  --path-rename src/scripts/:tools/
+```
+
+<Note>
+Specific file renames should come **before** directory renames to prevent conflicts.
+</Note>
+
+## Combining Filtering and Renaming
+
+### Filter Then Rename
+
+Path renaming doesn't filter paths - combine with `--path` for that:
+
+<Tabs>
+  <Tab title="Wrong">
+    ```bash
+    # This keeps only src/main/ - tools/ is never included!
+    git filter-repo \
+      --path src/main/ \
+      --path-rename tools/:scripts/
+    ```
+  </Tab>
+  <Tab title="Right">
+    ```bash
+    # Keep both src/main/ and tools/, then rename tools/
+    git filter-repo \
+      --path src/main/ \
+      --path tools/ \
+      --path-rename tools/:scripts/
+    ```
+  </Tab>
+</Tabs>
+
+### Create New Structure
+
+Restructure your repository layout:
+
+```bash
+# Move sources/ to src/main/ and keep only that
+git filter-repo \
+  --path-rename sources/:src/main/ \
+  --path src/main/
+```
+
+<Warning>
+Order is critical! The command above:
+1. First renames `sources/` → `src/main/`
+2. Then filters to keep only `src/main/`
+
+Reversing these steps would result in an empty repository.
+</Warning>
+
+## Restructuring Projects
+
+### Flatten Directory Structure
+
+Move files from nested directories to root:
+
+```bash
+# Move src/main/java/com/example/ to src/
+git filter-repo \
+  --path-rename src/main/java/com/example/:src/
+```
+
+### Create Nested Structure
+
+Add directory layers:
+
+```bash
+# Move all files under src/legacy/
+git filter-repo --path-rename :src/legacy/
+```
+
+Empty string before `:` means repository root.
+
+### Module Reorganization
+
+Reorganize a monorepo into separate modules:
+
+```bash
+git filter-repo \
+  --path-rename api/:services/api/ \
+  --path-rename web/:services/web/ \
+  --path-rename common/:lib/shared/
+```
+
+## Merging Repositories
+
+### Prepare Repository for Merge
+
+When merging multiple repositories, prefix each with a unique directory:
+
+<Tabs>
+  <Tab title="Repo A">
+    ```bash
+    cd repo-a
+    git filter-repo --to-subdirectory-filter project-a/
+    ```
+  </Tab>
+  <Tab title="Repo B">
+    ```bash
+    cd repo-b
+    git filter-repo --to-subdirectory-filter project-b/
+    ```
+  </Tab>
+  <Tab title="Merge">
+    ```bash
+    cd repo-a
+    git remote add repo-b ../repo-b
+    git fetch repo-b
+    git merge repo-b/main --allow-unrelated-histories
+    ```
+  </Tab>
+</Tabs>
+
+Result:
+```
+project-a/
+  (original repo-a contents)
+project-b/
+  (original repo-b contents)
+```
+
+### Split Monorepo
+
+Extract a module and rename it:
+
+```bash
+# Extract auth module and make it the root
+git filter-repo \
+  --path modules/auth/ \
+  --path-rename modules/auth/:
+```
+
+## Regex-Based Renaming
+
+Use regex for complex renaming patterns:
+
+```bash
+# Rename files like foo/bar/baz.text to bar/foo/baz.txt
+git filter-repo --paths-from-file - <<EOF
+regex:(.*)/([^/]*)/([^/]*)\.text$==>
+\2/\1/\3.txt
+EOF
+```
+
+<Note>
+**Regex Syntax:**
+- `(.*)` - Capture group (any characters)
+- `[^/]*` - Non-slash characters
+- `\1`, `\2`, `\3` - Back-references to captured groups
+
+See [Python regex syntax](https://docs.python.org/3/library/re.html) for details.
+</Note>
+
+## Complex Renaming Examples
+
+### Normalize File Extensions
+
+```bash
+# Create rename rules
+cat > renames.txt <<EOF
+regex:(.*/)?([^/]*)\.text$==>
+\1\2.txt
+regex:(.*/)?([^/]*)\.jpeg$==>
+\1\2.jpg
+EOF
+
+git filter-repo --paths-from-file renames.txt
+```
+
+### Add Version Prefix to Directories
+
+```bash
+# Rename api/ to api-v1/, web/ to web-v1/, etc.
+cat > renames.txt <<EOF
+api/==>api-v1/
+web/==>web-v1/
+shared/==>shared-v1/
+EOF
+
+git filter-repo --paths-from-file renames.txt
+```
+
+### Reorganize by Language
+
+Group files by programming language:
+
+```bash
+cat > renames.txt <<EOF
+glob:*.py==>python/
+glob:*.js==>javascript/
+glob:*.java==>java/
+glob:*.go==>golang/
+EOF
+
+git filter-repo --paths-from-file renames.txt
+```
+
+## Renaming with Callbacks
+
+For extremely complex renames, use Python callbacks:
+
+```bash
+git filter-repo --filename-callback '
+  if filename.startswith(b"src/"):
+    return b"lib/" + filename[4:]
+  elif filename.endswith(b".txt"):
+    return filename[:-4] + b".md"
+  else:
+    return filename
+'
+```
+
+See [Advanced Filtering](/guides/advanced-filtering) for more on callbacks.
+
+## Important Considerations
+
+<Warning>
+**Collision Detection**
+
+If renames cause two different files to have the same path, filter-repo will error:
+
+```
+Error: File collision detected: path/to/file.txt
+```
+
+Resolve by renaming one of the conflicting files first.
+</Warning>
+
+<Note>
+**Silent Overwrites**
+
+If you rename a path to one that already exists, the existing file is silently overwritten. Use `--analyze` to check for potential conflicts first.
+</Note>
+
+<Tip>
+**Test First**
+
+Use `--dry-run` to preview changes:
+
+```bash
+git filter-repo --dry-run \
+  --path-rename old/:new/
+```
+
+This shows what would happen without modifying the repository.
+</Tip>
+
+## Partial Renames
+
+Rename paths only on specific branches:
+
+```bash
+git filter-repo \
+  --refs feature-branch \
+  --path-rename old/:new/
+```
+
+<Warning>
+This uses `--partial` mode, which mixes old and new history. Use carefully!
+</Warning>
+
+## Verification
+
+After renaming, verify the results:
+
+```bash
+# Check that old paths are gone
+git log --all --oneline -- old/path/
+
+# Check that new paths exist
+git log --all --oneline -- new/path/
+
+# Verify specific file was renamed
+git log --follow --all -- new/path/file.txt
+```
+
+## Next Steps
+
+- Learn about [Content-Based Filtering](/guides/content-based-filtering)
+- Explore [Commit Message Rewriting](/guides/commit-message-rewriting)
+- See [Library Usage](/guides/library-usage) for programmatic control

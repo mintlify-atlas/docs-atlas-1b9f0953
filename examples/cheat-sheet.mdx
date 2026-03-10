@@ -1,0 +1,427 @@
+---
+title: Cheat Sheet
+description: Quick reference for common git-filter-repo operations
+---
+
+This cheat sheet provides quick reference for common git-filter-repo operations. Use the tabs below to navigate between different migration scenarios and common use cases.
+
+## Converting from filter-branch
+
+<Tabs>
+  <Tab title="Removing Files">
+    **filter-branch:**
+    ```bash
+    git filter-branch --tree-filter 'rm filename' HEAD
+    # or
+    git filter-branch --tree-filter 'rm -f filename' HEAD
+    # or (faster)
+    git filter-branch --index-filter 'git rm --cached --ignore-unmatch filename' HEAD
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --invert-paths --path filename
+    ```
+  </Tab>
+
+  <Tab title="Extracting Subdirectory">
+    **filter-branch:**
+    ```bash
+    git filter-branch --subdirectory-filter foodir -- --all
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --subdirectory-filter foodir
+    ```
+  </Tab>
+
+  <Tab title="Moving to Subdirectory">
+    **filter-branch:**
+    ```bash
+    git filter-branch --index-filter \
+        'git ls-files -s | sed "s-\t\"*-&newsubdir/-" |
+                GIT_INDEX_FILE=$GIT_INDEX_FILE.new \
+                        git update-index --index-info &&
+         mv "$GIT_INDEX_FILE.new" "$GIT_INDEX_FILE"' HEAD
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --to-subdirectory-filter newsubdir
+    ```
+  </Tab>
+
+  <Tab title="Re-grafting History">
+    **filter-branch:**
+    ```bash
+    git filter-branch --parent-filter 'sed "s/^\$/-p <graft-id>/"' HEAD
+    # or
+    git filter-branch --parent-filter \
+        'test $GIT_COMMIT = <commit-id> && echo "-p <graft-id>" || cat' HEAD
+    # or (better)
+    git replace --graft $commit-id $graft-id
+    git filter-branch $graft-id..HEAD
+    ```
+
+    **filter-repo:**
+    ```bash
+    git replace --graft $commit-id $graft-id
+    git filter-repo --proceed
+    ```
+
+    <Note>
+      `--proceed` is needed because filter-repo errors out if no arguments are specified.
+    </Note>
+  </Tab>
+
+  <Tab title="Rewriting Commit Messages">
+    **Removing text:**
+
+    **filter-branch:**
+    ```bash
+    git filter-branch --msg-filter 'sed -e "/^git-svn-id:/d"'
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --message-callback '
+        return re.sub(b"^git-svn-id:.*\n", b"", message, flags=re.MULTILINE)
+        '
+    ```
+
+    **Adding text:**
+
+    **filter-branch:**
+    ```bash
+    git filter-branch --msg-filter '
+            cat &&
+            echo "Acked-by: Bugs Bunny <bunny@bugzilla.org>"
+        ' master~10..master
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --message-callback '
+            return message + b"Acked-by: Bugs Bunny <bunny@bugzilla.org>\n"
+        ' --refs master~10..master
+    ```
+  </Tab>
+
+  <Tab title="Changing Author/Committer">
+    **filter-branch:**
+    ```bash
+    git filter-branch --env-filter '
+        if test "$GIT_AUTHOR_EMAIL" = "root@localhost"
+        then
+                GIT_AUTHOR_EMAIL=john@example.com
+        fi
+        if test "$GIT_COMMITTER_EMAIL" = "root@localhost"
+        then
+                GIT_COMMITTER_EMAIL=john@example.com
+        fi
+        ' -- --all
+    ```
+
+    **filter-repo (using mailmap):**
+    ```bash
+    # Ensure '<john@example.com> <root@localhost>' is a line in .mailmap
+    git filter-repo --use-mailmap
+    ```
+
+    **filter-repo (using callback):**
+    ```bash
+    git filter-repo --email-callback '
+      return email if email != b"root@localhost" else b"john@example.com"
+      '
+    ```
+
+    <Note>
+      Both filter-repo alternatives also fix tagger emails, unlike the filter-branch example.
+    </Note>
+  </Tab>
+
+  <Tab title="Code Formatting">
+    **filter-branch:**
+    ```bash
+    git filter-branch --tree-filter '
+        git ls-files -z "*.c" \
+            | xargs -0 -n 1 clang-format -style=file -i
+        '
+    ```
+
+    **filter-repo:**
+    ```bash
+    lint-history --relevant 'return filename.endswith(b".c")' \
+        clang-format -style=file -i
+    ```
+
+    <Note>
+      `lint-history` is a contrib script that comes with git-filter-repo.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Converting from BFG Repo Cleaner
+
+<Tabs>
+  <Tab title="Stripping Big Blobs">
+    **BFG:**
+    ```bash
+    java -jar bfg.jar --strip-blobs-bigger-than 100M some-big-repo.git
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --strip-blobs-bigger-than 100M
+    ```
+  </Tab>
+
+  <Tab title="Deleting Files">
+    **BFG:**
+    ```bash
+    java -jar bfg.jar --delete-files id_{dsa,rsa} my-repo.git
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --use-base-name --path id_dsa --path id_rsa --invert-paths
+    ```
+  </Tab>
+
+  <Tab title="Removing Sensitive Content">
+    **BFG:**
+    ```bash
+    java -jar bfg.jar --replace-text passwords.txt my-repo.git
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --replace-text passwords.txt
+    ```
+
+    <Note>
+      For regex replacements using "==>", filter-repo uses `\1`, `\2`, etc. for replacement strings (Python style), while BFG uses `$1`, `$2`, etc. (Scala style).
+    </Note>
+  </Tab>
+
+  <Tab title="Removing Files/Folders">
+    **BFG:**
+    ```bash
+    java -jar bfg.jar --delete-folders .git --delete-files .git \
+        --no-blob-protection my-repo.git
+    ```
+
+    **filter-repo:**
+    ```bash
+    git filter-repo --invert-paths --path-glob '*/.git' --path .git
+    ```
+
+    <Note>
+      The glob `*/.git` matches `.git` directories one or more levels deep (git-style glob). The `--path .git` handles the toplevel case.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Common Operations
+
+<Accordion title="File Operations">
+  ### Purge a large list of files
+
+  Create a file with paths to delete (one per line):
+  ```bash
+  git filter-repo --invert-paths --paths-from-file ../DELETED_FILENAMES.txt
+  ```
+
+  ### Removing a directory
+  ```bash
+  git filter-repo --path node_modules/electron/dist/ --invert-paths
+  ```
+
+  ### Removing paths with a certain extension
+  ```bash
+  git filter-repo --invert-paths --path-glob '*.xsa'
+  ```
+
+  Or using a callback:
+  ```bash
+  git filter-repo --filename-callback '
+      if filename.endswith(b".xsa"):
+          return None
+      return filename'
+  ```
+
+  ### Extract library from subdirectory
+
+  Keep `src/some-folder/some-feature/` but rename it to `src/`:
+  ```bash
+  git filter-repo \
+      --path src/some-folder/some-feature/ \
+      --path-rename src/some-folder/some-feature/:src/
+  ```
+
+  ### Only keep files from specific branches
+  ```bash
+  git ls-tree -r ${BRANCH1} >../my-files
+  git ls-tree -r ${BRANCH2} >>../my-files
+  sort ../my-files | uniq >../my-relevant-files
+  git filter-repo --paths-from-file ../my-relevant-files
+  ```
+</Accordion>
+
+<Accordion title="Content Modifications">
+  ### Replace words in all commit messages
+  ```bash
+  git filter-repo --message-callback 'return message.replace(b"stuff", b"task")'
+  ```
+
+  ### Remove spaces at end of lines
+  ```bash
+  git filter-repo --replace-text <(echo 'regex:[\r\t ]+(\n|$)==>\n')
+  ```
+
+  ### Replace binary blob in history
+
+  Replace blob with hash `f4ede2e944868b9a08401dafeb2b944c7166fd0a`:
+  ```bash
+  git filter-repo --blob-callback '
+      if blob.original_id == b"f4ede2e944868b9a08401dafeb2b944c7166fd0a":
+          blob.data = open("../alternative-file.jpg", "rb").read()
+  '
+  ```
+
+  Or using git replace:
+  ```bash
+  git replace -f f4ede2e944868b9a08401dafeb2b944c7166fd0a \
+      $(git hash-object -w ../alternative-file.jpg)
+  git filter-repo --proceed
+  ```
+
+  ### Renormalize line endings and add .gitattributes
+  ```bash
+  contrib/filter-repo-demos/lint-history dos2unix
+  # Edit .gitattributes
+  contrib/filter-repo-demos/insert-beginning .gitattributes
+  ```
+</Accordion>
+
+<Accordion title="Filename Filtering">
+  ### Include and exclude rules
+
+  Include all files under `src/` except `src/README.md`:
+  ```bash
+  git filter-repo --filename-callback '
+      if filename == b"src/README.md":
+          return None
+      if filename.startswith(b"src/"):
+          return filename
+    return None'
+  ```
+
+  ### Remove files with backslashes
+  ```bash
+  git filter-repo --filename-callback 'return None if b"\\" in filename else filename'
+  ```
+
+  ### Convert NFD filenames to NFC
+  ```bash
+  git filter-repo --filename-callback '
+      import unicodedata
+      try:
+         return bytearray(unicodedata.normalize("NFC", filename.decode("utf-8")), "utf-8")
+      except:
+        return filename
+  '
+  ```
+</Accordion>
+
+<Accordion title="Author/Committer Modifications">
+  ### Set committer of last few commits
+  ```bash
+  git filter-repo --refs main~5..main --commit-callback '
+      commit.committer_name = b"My Wonderful Self"
+      commit.committer_email = b"my@self.org"
+  '
+  ```
+
+  ### Handle special characters in names
+  ```bash
+  git filter-repo --refs main~5..main --commit-callback '
+      if commit.author_email == b"example@test.com":
+          commit.author_name = "Raphaël González".encode()
+          commit.author_email = b"rgonzalez@test.com"
+  '
+  ```
+</Accordion>
+
+<Accordion title="Advanced Operations">
+  ### Add files to root commits
+  ```bash
+  git filter-repo --commit-callback "if not commit.parents: commit.file_changes += [
+      FileChange(b'M', b'README.md', b'$(git hash-object -w '/path/to/README.md')', b'100644'), 
+      FileChange(b'M', b'src/.gitignore', b'$(git hash-object -w '/path/to/.gitignore')', b'100644')]"
+  ```
+
+  ### Update submodule hashes
+
+  Update submodule at `src/my-submodule` according to mapping:
+  ```bash
+  git filter-repo --file-info-callback '
+      if filename == b"src/my-submodule" and blob_id == b"edf570fde099c0705432a389b96cb86489beda09":
+          blob_id = b"9cce52ae0806d695956dcf662cd74b497eaa7b12"
+      if filename == b"src/my-submodule" and blob_id == b"644f7c55e1a88a29779dc86b9ff92f512bf9bc11":
+          blob_id = b"88b02e9e45c0a62db2f1751b6c065b0c2e538820"
+      return (filename, mode, blob_id)
+  '
+  ```
+
+  ### Replace PNGs with compressed versions
+
+  First identify the blob IDs:
+  ```bash
+  git log -1 --raw --no-abbrev ${COMMIT_WHERE_YOU_COMPRESSED_PNGS}
+  ```
+
+  Then replace:
+  ```bash
+  git filter-repo --file-info-callback '
+      if filename == b"resources/foo.png" and blob_id == b"edf570fde099c0705432a389b96cb86489beda09":
+          blob_id = b"9cce52ae0806d695956dcf662cd74b497eaa7b12"
+      if filename == b"resources/bar.png" and blob_id == b"644f7c55e1a88a29779dc86b9ff92f512bf9bc11":
+          blob_id = b"88b02e9e45c0a62db2f1751b6c065b0c2e538820"
+      return (filename, mode, blob_id)
+  '
+  ```
+
+  ### Remove commits older than N days
+
+  <Warning>
+    This changes every commit hash and discards history. Use with caution.
+  </Warning>
+
+  ```bash
+  git replace --graft ${OLD_COMMIT}
+  git filter-repo --proceed
+  ```
+
+  The `git replace --graft` command with no parent arguments makes `${OLD_COMMIT}` a new root commit.
+</Accordion>
+
+## Restricting to a Range
+
+All filter-repo commands can be restricted to a specific range of commits:
+
+```bash
+# Single range
+git filter-repo ... --refs C..H
+
+# With exclusions
+git filter-repo ... --refs C..H ^D
+
+# Alternative range
+git filter-repo ... --refs D..H ^C
+```
+
+<Note>
+  Use `^C` instead of `--not C` since `--not` appears to be a flag name which breaks parsing.
+</Note>

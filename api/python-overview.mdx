@@ -1,0 +1,170 @@
+---
+title: "Python Library Overview"
+description: "Using git-filter-repo as a Python library for advanced repository filtering"
+---
+
+## Introduction
+
+git-filter-repo can be used as a Python library for complex repository filtering operations. This allows you to programmatically manipulate Git history with full control over commits, blobs, tags, and other Git objects.
+
+<Warning>
+**API BACKWARD COMPATIBILITY CAVEAT**
+
+Programs using git-filter-repo as a library can reach into its internals, but backward compatibility of all APIs is not guaranteed. Since repository filtering is typically a one-shot operation, this should not be a problem in practice. If you want to re-use a filtering program, either use the same version of git and git-filter-repo, or make sure to re-test it.
+</Warning>
+
+## Installation
+
+To use git-filter-repo as a library, you need to make it importable in Python:
+
+```python
+import git_filter_repo as fr
+```
+
+This requires either:
+- Creating a symlink from `git-filter-repo` to `git_filter_repo.py`
+- Adding the directory containing `git-filter-repo` to your `PYTHONPATH`
+- Renaming or copying `git-filter-repo` to `git_filter_repo.py`
+
+## Basic Usage
+
+The simplest program that behaves identically to the command-line tool:
+
+```python
+import sys
+import git_filter_repo as fr
+
+args = fr.FilteringOptions.parse_args(sys.argv[1:])
+if args.analyze:
+    fr.RepoAnalyze.run(args)
+else:
+    filter = fr.RepoFilter(args)
+    filter.run()
+```
+
+## Core Components
+
+The library exports several key classes and functions:
+
+### Data Structures
+- `Blob` - Represents file content
+- `Commit` - Represents a commit with metadata and file changes
+- `Tag` - Represents an annotated tag
+- `Reset` - Represents branch creation/reset
+- `FileChange` - Represents a file modification, deletion, or addition
+- `Progress` - Progress messages for fast-import
+- `Checkpoint` - Checkpointing directives for fast-import
+
+### Processing
+- `FastExportParser` - Parses git fast-export output
+- `RepoFilter` - Main filtering engine
+- `FilteringOptions` - Command-line argument parsing
+- `ProgressWriter` - Progress output handling
+
+### Utilities
+- `GitUtils` - Git repository utilities
+- `string_to_date` - Parse git date format
+- `date_to_string` - Convert to git date format
+- `record_id_rename` - Record mark translations
+
+## Common Use Cases
+
+### Simple Callback Example
+
+Modify all commit messages:
+
+```python
+import git_filter_repo as fr
+
+def my_commit_callback(commit, metadata):
+    # Modify commit message
+    commit.message = commit.message.replace(b'old', b'new')
+
+args = fr.FilteringOptions.parse_args(['--force'])
+filter = fr.RepoFilter(args, commit_callback=my_commit_callback)
+filter.run()
+```
+
+### Inserting New Content
+
+Add a LICENSE file to the root commit:
+
+```python
+import subprocess
+import git_filter_repo as fr
+
+# Create blob from file
+fhash = subprocess.check_output(['git', 'hash-object', '-w', 'LICENSE']).strip()
+
+def fixup_commits(commit, metadata):
+    if len(commit.parents) == 0:
+        # This is a root commit
+        commit.file_changes.append(
+            fr.FileChange(b'M', b'LICENSE', fhash, b'100644')
+        )
+
+args = fr.FilteringOptions.parse_args(['--force'])
+filter = fr.RepoFilter(args, commit_callback=fixup_commits)
+filter.run()
+```
+
+### Processing Blobs
+
+Modify file contents:
+
+```python
+import git_filter_repo as fr
+
+def my_blob_callback(blob, metadata):
+    # Skip binary files
+    if b"\0" not in blob.data[0:8192]:
+        # Modify text content
+        blob.data = blob.data.replace(b'password', b'***')
+
+args = fr.FilteringOptions.parse_args(['--force'])
+filter = fr.RepoFilter(args, blob_callback=my_blob_callback)
+filter.run()
+```
+
+## Callback Metadata
+
+Callbacks receive a `metadata` dict containing:
+
+<ResponseField name="commit_rename_func" type="function">
+Function to translate old commit hashes to new ones
+</ResponseField>
+
+<ResponseField name="ancestry_graph" type="AncestryGraph">
+Graph of new commit ancestry relationships
+</ResponseField>
+
+<ResponseField name="original_ancestry_graph" type="AncestryGraph">
+Graph of original commit ancestry relationships
+</ResponseField>
+
+For commit callbacks, additional fields may include:
+
+<ResponseField name="orig_parents" type="list">
+Original parent commits before filtering
+</ResponseField>
+
+<ResponseField name="had_file_changes" type="bool">
+Whether the commit originally had file changes
+</ResponseField>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Data Structures" icon="cubes" href="/api/python-data-structures">
+    Learn about Blob, Commit, Tag, and other objects
+  </Card>
+  <Card title="Filtering APIs" icon="filter" href="/api/python-filtering">
+    Explore RepoFilter and FilteringOptions
+  </Card>
+  <Card title="Callbacks" icon="code" href="/api/python-callbacks">
+    Master the callback system
+  </Card>
+  <Card title="Examples" icon="book" href="https://github.com/newren/git-filter-repo/tree/main/contrib/filter-repo-demos">
+    See real-world examples
+  </Card>
+</CardGroup>

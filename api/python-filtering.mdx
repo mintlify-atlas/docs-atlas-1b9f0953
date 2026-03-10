@@ -1,0 +1,447 @@
+---
+title: "Filtering APIs"
+description: "RepoFilter and FilteringOptions classes for repository filtering"
+---
+
+## FilteringOptions
+
+Handles command-line argument parsing and filtering configuration.
+
+### parse_args
+
+Parse command-line arguments into a configuration object.
+
+```python
+args = fr.FilteringOptions.parse_args(input_args, error_on_empty=True)
+```
+
+<ParamField path="input_args" type="list[str]" required>
+List of command-line arguments (typically `sys.argv[1:]`)
+</ParamField>
+
+<ParamField path="error_on_empty" type="bool" default={true}>
+Whether to raise an error if no arguments provided
+</ParamField>
+
+Returns an `argparse.Namespace` object with all filtering options.
+
+#### Example
+
+```python
+import git_filter_repo as fr
+
+# Parse with custom options
+args = fr.FilteringOptions.parse_args([
+    '--path', 'src/',
+    '--path', 'docs/',
+    '--force',
+    '--replace-text', 'expressions.txt'
+])
+
+# Create filter with these options
+filter = fr.RepoFilter(args)
+filter.run()
+```
+
+### default_options
+
+Get default filtering options without parsing arguments.
+
+```python
+args = fr.FilteringOptions.default_options()
+```
+
+Returns an `argparse.Namespace` with default values. Useful when you want to programmatically set options:
+
+```python
+args = fr.FilteringOptions.default_options()
+args.force = True
+args.refs = ['--all']
+args.path_changes = [('filter', 'match', b'src/')]
+```
+
+### Common Options
+
+Key attributes in the returned args object:
+
+<ResponseField name="force" type="bool" default={false}>
+Allow filtering on non-fresh clones
+</ResponseField>
+
+<ResponseField name="partial" type="bool" default={false}>
+Do partial history rewrite (keeps old and new history)
+</ResponseField>
+
+<ResponseField name="refs" type="list[str]" default={["--all"]}>
+Refs to filter (e.g., `['refs/heads/main']` or `['--all']`)
+</ResponseField>
+
+<ResponseField name="replace_refs" type="str">
+How to handle replace refs: `'delete-no-add'`, `'delete-and-add'`, `'update-no-add'`, `'update-or-add'`, `'update-and-add'`
+</ResponseField>
+
+<ResponseField name="prune_empty" type="str" default={"auto"}>
+Whether to prune empty commits: `'always'`, `'auto'`, `'never'`
+</ResponseField>
+
+<ResponseField name="path_changes" type="list">
+List of path filtering/renaming operations. Each item is a tuple: `(mod_type, match_type, value)`
+</ResponseField>
+
+<ResponseField name="max_blob_size" type="int" default={0}>
+Strip blobs larger than this size (in bytes)
+</ResponseField>
+
+<ResponseField name="replace_text" type="dict">
+Text replacement rules from `--replace-text` file
+</ResponseField>
+
+<ResponseField name="mailmap" type="MailmapInfo">
+Mailmap for name/email translation
+</ResponseField>
+
+<ResponseField name="source" type="bytes">
+Source repository path (for `--source`)
+</ResponseField>
+
+<ResponseField name="target" type="bytes">
+Target repository path (for `--target`)
+</ResponseField>
+
+<ResponseField name="quiet" type="bool" default={false}>
+Suppress progress output
+</ResponseField>
+
+<ResponseField name="debug" type="bool" default={false}>
+Show debug information
+</ResponseField>
+
+## RepoFilter
+
+The main filtering engine that processes repository history.
+
+### Constructor
+
+```python
+filter = fr.RepoFilter(
+    args,
+    filename_callback=None,
+    message_callback=None,
+    name_callback=None,
+    email_callback=None,
+    refname_callback=None,
+    blob_callback=None,
+    commit_callback=None,
+    tag_callback=None,
+    reset_callback=None,
+    done_callback=None,
+    file_info_callback=None
+)
+```
+
+<ParamField path="args" type="argparse.Namespace" required>
+Filtering options from `FilteringOptions.parse_args()` or `default_options()`
+</ParamField>
+
+<ParamField path="filename_callback" type="callable">
+Function called for each filename: `def callback(filename: bytes) -> bytes | None`
+</ParamField>
+
+<ParamField path="message_callback" type="callable">
+Function called for commit/tag messages: `def callback(message: bytes) -> bytes`
+</ParamField>
+
+<ParamField path="name_callback" type="callable">
+Function called for author/committer/tagger names: `def callback(name: bytes) -> bytes`
+</ParamField>
+
+<ParamField path="email_callback" type="callable">
+Function called for email addresses: `def callback(email: bytes) -> bytes`
+</ParamField>
+
+<ParamField path="refname_callback" type="callable">
+Function called for branch/tag refs: `def callback(refname: bytes) -> bytes`
+</ParamField>
+
+<ParamField path="blob_callback" type="callable">
+Function called for each blob: `def callback(blob: Blob, metadata: dict) -> None`
+</ParamField>
+
+<ParamField path="commit_callback" type="callable">
+Function called for each commit: `def callback(commit: Commit, metadata: dict) -> None`
+</ParamField>
+
+<ParamField path="tag_callback" type="callable">
+Function called for each tag: `def callback(tag: Tag, metadata: dict) -> None`
+</ParamField>
+
+<ParamField path="reset_callback" type="callable">
+Function called for each reset: `def callback(reset: Reset, metadata: dict) -> None`
+</ParamField>
+
+<ParamField path="done_callback" type="callable">
+Function called when processing completes: `def callback() -> None`
+</ParamField>
+
+<ParamField path="file_info_callback" type="callable">
+Function called for file changes: `def callback(filename: bytes, mode: bytes, blob_id: int|bytes, value: FileInfoValueHelper) -> tuple`
+</ParamField>
+
+### Methods
+
+#### run
+
+Execute the filtering operation.
+
+```python
+filter.run()
+```
+
+This method:
+1. Runs sanity checks on the repository
+2. Starts fast-export to read history
+3. Processes each Git object through callbacks
+4. Writes filtered objects to fast-import
+5. Updates refs and performs cleanup
+
+#### insert
+
+Manually insert a Git object into the output stream.
+
+```python
+filter.insert(obj)
+```
+
+<ParamField path="obj" type="Blob | Commit | Reset | Tag" required>
+The object to insert
+</ParamField>
+
+Useful for:
+- Adding new commits
+- Inserting modified blobs
+- Creating new branches/tags
+
+```python
+def add_license_blob(commit, metadata):
+    if len(commit.parents) == 0:  # Root commit
+        # Create new blob with license text
+        blob = fr.Blob(b'MIT License\n...')
+        filter.insert(blob)
+        
+        # Add file change to commit
+        commit.file_changes.append(
+            fr.FileChange(b'M', b'LICENSE', blob.id, b'100644')
+        )
+```
+
+### Class Methods
+
+#### sanity_check
+
+Check if repository is safe to filter (called automatically by `run()`).
+
+```python
+fr.RepoFilter.sanity_check(refs, is_bare, config_settings)
+```
+
+<ParamField path="refs" type="dict" required>
+Dictionary of ref names to hashes
+</ParamField>
+
+<ParamField path="is_bare" type="bool" required>
+Whether repository is bare
+</ParamField>
+
+<ParamField path="config_settings" type="dict" required>
+Git config settings
+</ParamField>
+
+Raises `SystemExit` if repository doesn't appear to be a fresh clone.
+
+## GitUtils
+
+Utility class for Git operations.
+
+### get_commit_count
+
+Count commits in repository.
+
+```python
+count = fr.GitUtils.get_commit_count(repo, *args)
+```
+
+<ParamField path="repo" type="bytes" required>
+Path to repository
+</ParamField>
+
+<ParamField path="args" type="list">
+Arguments to `git rev-list` (default: `['--all']`)
+</ParamField>
+
+### get_blob_sizes
+
+Get sizes of all blobs in repository.
+
+```python
+unpacked_size, packed_size = fr.GitUtils.get_blob_sizes(quiet=False)
+```
+
+Returns two dicts mapping blob hash to size in bytes.
+
+### get_file_changes
+
+Get file changes between two commits.
+
+```python
+file_changes = fr.GitUtils.get_file_changes(
+    repo, parent_hash, commit_hash
+)
+```
+
+<ParamField path="repo" type="bytes" required>
+Path to repository
+</ParamField>
+
+<ParamField path="parent_hash" type="bytes" required>
+Parent commit hash
+</ParamField>
+
+<ParamField path="commit_hash" type="bytes" required>
+Commit hash
+</ParamField>
+
+Returns list of `FileChange` objects.
+
+### get_refs
+
+Get all refs in repository.
+
+```python
+refs = fr.GitUtils.get_refs(repo_working_dir)
+```
+
+Returns dict mapping ref names (bytes) to commit hashes (bytes).
+
+## Complete Example
+
+Comprehensive filtering script combining multiple features:
+
+```python
+#!/usr/bin/env python3
+import sys
+import git_filter_repo as fr
+
+# Track statistics
+stats = {
+    'commits_processed': 0,
+    'blobs_modified': 0,
+    'files_removed': 0
+}
+
+def blob_callback(blob, metadata):
+    """Replace sensitive data in blobs."""
+    # Only process text files
+    if b"\0" not in blob.data[0:8192]:
+        original_size = len(blob.data)
+        
+        # Replace sensitive patterns
+        blob.data = blob.data.replace(
+            b'password = "secret"',
+            b'password = "***"'
+        )
+        
+        if len(blob.data) != original_size:
+            stats['blobs_modified'] += 1
+
+def commit_callback(commit, metadata):
+    """Filter commits and update metadata."""
+    stats['commits_processed'] += 1
+    
+    # Remove files matching pattern
+    original_count = len(commit.file_changes)
+    commit.file_changes = [
+        c for c in commit.file_changes
+        if not c.filename.endswith(b'.log')
+    ]
+    stats['files_removed'] += original_count - len(commit.file_changes)
+    
+    # Update commit message
+    if b'[skip ci]' not in commit.message:
+        commit.message = commit.message.rstrip() + b'\n\n[filtered]'
+    
+    # Update author email domain
+    if commit.author_email.endswith(b'@oldcompany.com'):
+        commit.author_email = commit.author_email.replace(
+            b'@oldcompany.com',
+            b'@newcompany.com'
+        )
+
+def done_callback():
+    """Print statistics when filtering completes."""
+    print(f"\nFiltering Statistics:")
+    print(f"  Commits processed: {stats['commits_processed']}")
+    print(f"  Blobs modified: {stats['blobs_modified']}")
+    print(f"  Files removed: {stats['files_removed']}")
+
+# Parse arguments
+args = fr.FilteringOptions.parse_args([
+    '--force',
+    '--path', 'src/',
+    '--path', 'docs/',
+    '--replace-text', 'expressions.txt'
+])
+
+# Create and run filter
+filter = fr.RepoFilter(
+    args,
+    blob_callback=blob_callback,
+    commit_callback=commit_callback,
+    done_callback=done_callback
+)
+filter.run()
+
+print("\nFiltering complete!")
+```
+
+## Advanced Usage
+
+### Multiple Source/Target Repositories
+
+```python
+import git_filter_repo as fr
+
+# Set up source filter
+source_args = fr.FilteringOptions.default_options()
+source_args.source = b'/path/to/source/repo'
+source_args.refs = ['--all']
+
+# Set up target filter  
+target_args = fr.FilteringOptions.default_options()
+target_args.target = b'/path/to/target/repo'
+target_args.force = True
+
+# Create filters
+target_filter = fr.RepoFilter(target_args)
+target_filter.importer_only()
+
+source_filter = fr.RepoFilter(source_args, commit_callback=my_callback)
+source_filter.set_output(target_filter)
+
+# Run the pipeline
+source_filter.run()
+```
+
+### State Branch for Incremental Filtering
+
+```python
+args = fr.FilteringOptions.parse_args([
+    '--state-branch', 'filter-state',
+    '--force'
+])
+
+filter = fr.RepoFilter(args, commit_callback=my_callback)
+filter.run()
+
+# On subsequent runs, the state is preserved
+# and only new commits are processed
+```

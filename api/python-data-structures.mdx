@@ -1,0 +1,388 @@
+---
+title: "Data Structures"
+description: "Git object representations in the Python library"
+---
+
+## Overview
+
+The git-filter-repo library represents Git objects as Python classes. These objects are created when parsing fast-export output and can be modified by your callbacks before being written to fast-import.
+
+## Blob
+
+Represents file content (a Git blob object).
+
+```python
+blob = fr.Blob(data, original_id=None)
+```
+
+<ParamField path="data" type="bytes" required>
+The file content as bytes
+</ParamField>
+
+<ParamField path="original_id" type="bytes">
+The original Git hash of the blob (from fast-export's `original-oid`)
+</ParamField>
+
+### Attributes
+
+<ResponseField name="id" type="int">
+The mark (internal ID) for this blob in the fast-import stream
+</ResponseField>
+
+<ResponseField name="old_id" type="int">
+The original mark from fast-export, if different from `id`
+</ResponseField>
+
+<ResponseField name="original_id" type="bytes">
+The Git object hash (40-character hex string)
+</ResponseField>
+
+<ResponseField name="data" type="bytes">
+The blob content. Modify this to change file contents.
+</ResponseField>
+
+<ResponseField name="dumped" type="int">
+Whether this object has been written (0=not yet, 1=written, 2=skipped)
+</ResponseField>
+
+### Methods
+
+<ResponseField name="dump(file_)" type="method">
+Writes the blob to the fast-import stream
+</ResponseField>
+
+<ResponseField name="skip(new_id=None)" type="method">
+Marks this blob to be skipped (not written to output)
+</ResponseField>
+
+### Example
+
+```python
+def process_blob(blob, metadata):
+    # Modify text files only
+    if b"\0" not in blob.data[0:8192]:
+        # Replace sensitive data
+        blob.data = blob.data.replace(b'SECRET_KEY', b'***REDACTED***')
+    
+    # Skip large blobs
+    if len(blob.data) > 10_000_000:
+        blob.skip()
+```
+
+## FileChange
+
+Represents a file change within a commit (modify, delete, or rename).
+
+```python
+change = fr.FileChange(type_, filename=None, id_=None, mode=None)
+```
+
+<ParamField path="type_" type="bytes" required>
+The type of change: `b'M'` (modify), `b'D'` (delete), or `b'DELETEALL'`
+</ParamField>
+
+<ParamField path="filename" type="bytes">
+The file path (required for M and D, None for DELETEALL)
+</ParamField>
+
+<ParamField path="id_" type="int | bytes">
+The blob ID (mark or hash). Required for M type.
+</ParamField>
+
+<ParamField path="mode" type="bytes">
+File mode: `b'100644'` (regular), `b'100755'` (executable), `b'120000'` (symlink), or `b'160000'` (submodule)
+</ParamField>
+
+### Attributes
+
+<ResponseField name="type" type="bytes">
+The change type (`b'M'`, `b'D'`, or `b'DELETEALL'`)
+</ResponseField>
+
+<ResponseField name="filename" type="bytes">
+The file path relative to repository root
+</ResponseField>
+
+<ResponseField name="mode" type="bytes">
+The file mode (Unix permissions)
+</ResponseField>
+
+<ResponseField name="blob_id" type="int | bytes">
+The blob mark or hash. None means the blob was filtered out.
+</ResponseField>
+
+### Example
+
+```python
+def add_file_to_commit(commit, metadata):
+    # Add a new file
+    commit.file_changes.append(
+        fr.FileChange(b'M', b'README.md', blob_id, b'100644')
+    )
+    
+    # Delete a file
+    commit.file_changes.append(
+        fr.FileChange(b'D', b'secrets.txt')
+    )
+    
+    # Filter out changes to .pyc files
+    commit.file_changes = [
+        c for c in commit.file_changes
+        if not c.filename.endswith(b'.pyc')
+    ]
+```
+
+## Commit
+
+Represents a Git commit with all its metadata and file changes.
+
+```python
+commit = fr.Commit(
+    branch,
+    author_name, author_email, author_date,
+    committer_name, committer_email, committer_date,
+    message,
+    file_changes,
+    parents,
+    original_id=None,
+    encoding=None
+)
+```
+
+<ParamField path="branch" type="bytes" required>
+The branch name (e.g., `b'refs/heads/main'`)
+</ParamField>
+
+<ParamField path="author_name" type="bytes" required>
+Author's name
+</ParamField>
+
+<ParamField path="author_email" type="bytes" required>
+Author's email
+</ParamField>
+
+<ParamField path="author_date" type="bytes" required>
+Author date in format: `b'1234567890 +0000'`
+</ParamField>
+
+<ParamField path="committer_name" type="bytes" required>
+Committer's name
+</ParamField>
+
+<ParamField path="committer_email" type="bytes" required>
+Committer's email
+</ParamField>
+
+<ParamField path="committer_date" type="bytes" required>
+Committer date in format: `b'1234567890 +0000'`
+</ParamField>
+
+<ParamField path="message" type="bytes" required>
+The commit message
+</ParamField>
+
+<ParamField path="file_changes" type="list[FileChange]" required>
+List of FileChange objects
+</ParamField>
+
+<ParamField path="parents" type="list" required>
+List of parent commit IDs (marks or hashes)
+</ParamField>
+
+<ParamField path="original_id" type="bytes">
+Original Git commit hash
+</ParamField>
+
+<ParamField path="encoding" type="bytes">
+Commit message encoding (None implies UTF-8)
+</ParamField>
+
+### Attributes
+
+All constructor parameters are available as attributes, plus:
+
+<ResponseField name="id" type="int">
+The mark for this commit
+</ResponseField>
+
+<ResponseField name="old_id" type="int">
+The original mark from fast-export
+</ResponseField>
+
+### Methods
+
+<ResponseField name="first_parent()" type="method">
+Returns the first parent commit ID, or None if no parents
+</ResponseField>
+
+<ResponseField name="skip(new_id=None)" type="method">
+Marks this commit to be skipped (not written). If parents exist, commits that had this as a parent will use `new_id` as the new parent.
+</ResponseField>
+
+### Example
+
+```python
+def process_commit(commit, metadata):
+    # Modify commit message
+    commit.message = commit.message + b'\n\nProcessed by filter-repo'
+    
+    # Update author
+    if commit.author_email == b'old@example.com':
+        commit.author_email = b'new@example.com'
+    
+    # Skip empty commits
+    if not commit.file_changes and commit.parents:
+        commit.skip(commit.first_parent())
+    
+    # Only keep changes to specific directory
+    commit.file_changes = [
+        c for c in commit.file_changes
+        if c.filename.startswith(b'src/')
+    ]
+```
+
+## Tag
+
+Represents an annotated tag.
+
+```python
+tag = fr.Tag(
+    ref, from_ref,
+    tagger_name, tagger_email, tagger_date, tag_msg,
+    original_id=None
+)
+```
+
+<ParamField path="ref" type="bytes" required>
+Tag name (without `refs/tags/` prefix)
+</ParamField>
+
+<ParamField path="from_ref" type="int | bytes" required>
+The commit this tag points to (mark or hash)
+</ParamField>
+
+<ParamField path="tagger_name" type="bytes">
+Tagger's name
+</ParamField>
+
+<ParamField path="tagger_email" type="bytes">
+Tagger's email
+</ParamField>
+
+<ParamField path="tagger_date" type="bytes">
+Tag date in format: `b'1234567890 +0000'`
+</ParamField>
+
+<ParamField path="tag_msg" type="bytes" required>
+The tag message
+</ParamField>
+
+<ParamField path="original_id" type="bytes">
+Original Git tag hash
+</ParamField>
+
+### Example
+
+```python
+def process_tag(tag, metadata):
+    # Rename tags
+    if tag.ref.startswith(b'v'):
+        tag.ref = b'version-' + tag.ref[1:]
+    
+    # Update tag message
+    tag.message = tag.message.replace(b'Release', b'Version')
+```
+
+## Reset
+
+Represents a branch creation or reset.
+
+```python
+reset = fr.Reset(ref, from_ref=None)
+```
+
+<ParamField path="ref" type="bytes" required>
+The branch reference (e.g., `b'refs/heads/main'`)
+</ParamField>
+
+<ParamField path="from_ref" type="int | bytes">
+The commit to reset/point the branch to (mark or hash)
+</ParamField>
+
+### Example
+
+```python
+def process_reset(reset, metadata):
+    # Rename branches
+    if reset.ref == b'refs/heads/master':
+        reset.ref = b'refs/heads/main'
+```
+
+## Progress
+
+Represents a progress message that fast-import can display.
+
+```python
+progress = fr.Progress(message)
+```
+
+<ParamField path="message" type="bytes" required>
+The progress message
+</ParamField>
+
+## Checkpoint
+
+Represents a checkpoint directive for fast-import (forces writing current state).
+
+```python
+checkpoint = fr.Checkpoint()
+```
+
+## Date Utilities
+
+Helper functions for working with Git date formats.
+
+### string_to_date
+
+Parse a Git date string into a Python datetime object.
+
+```python
+date_obj = fr.string_to_date(b'1234567890 +0000')
+```
+
+<ParamField path="datestring" type="bytes" required>
+Git date format: `b'<unix_timestamp> <timezone_offset>'`
+</ParamField>
+
+Returns a `datetime` object with timezone information.
+
+### date_to_string
+
+Convert a datetime object to Git date format.
+
+```python
+date_str = fr.date_to_string(date_obj)
+```
+
+<ParamField path="dateobj" type="datetime" required>
+A datetime object with timezone information
+</ParamField>
+
+Returns bytes in format: `b'<unix_timestamp> <timezone_offset>'`
+
+### Example
+
+```python
+from datetime import datetime, timezone
+import git_filter_repo as fr
+
+def update_dates(commit, metadata):
+    # Parse existing date
+    author_date = fr.string_to_date(commit.author_date)
+    
+    # Modify (e.g., move to UTC)
+    utc_date = author_date.astimezone(timezone.utc)
+    
+    # Convert back
+    commit.author_date = fr.date_to_string(utc_date)
+```

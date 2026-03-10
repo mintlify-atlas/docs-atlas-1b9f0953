@@ -1,0 +1,304 @@
+---
+title: 'Reference Renaming Options'
+description: 'Options for renaming branches, tags, and other Git references'
+---
+
+# Reference Renaming Options
+
+Options for renaming Git references including branches and tags.
+
+## Tag Renaming
+
+### --tag-rename
+
+<ParamField path="--tag-rename" type="string">
+  Rename tags by replacing prefix.
+  
+  **Format:** `OLD:NEW`
+  
+  **Applies to:** Tag names only (use `--refname-callback` for branches)
+  
+  **Empty values:** Either OLD or NEW can be empty
+  
+  **How it works:**
+  - Matches tags starting with `OLD` prefix
+  - Replaces the `OLD` prefix with `NEW` prefix
+  - Rest of tag name remains unchanged
+  
+  **Basic examples:**
+  ```bash
+  # Rename tag prefix
+  git filter-repo --tag-rename v:version-
+  # v1.0.0 -> version-1.0.0
+  # v2.1.3 -> version-2.1.3
+  
+  # Remove tag prefix
+  git filter-repo --tag-rename release-:
+  # release-1.0 -> 1.0
+  # release-2.0 -> 2.0
+  
+  # Add tag prefix
+  git filter-repo --tag-rename :prod-
+  # 1.0.0 -> prod-1.0.0
+  # 2.0.0 -> prod-2.0.0
+  
+  # Change tag prefix
+  git filter-repo --tag-rename foo:bar
+  # foo-1.2.3 -> bar-1.2.3
+  # foo-alpha -> bar-alpha
+  ```
+</ParamField>
+
+## Common Use Cases
+
+### Preparing for Repository Merge
+
+When merging repositories, avoid tag name conflicts:
+
+```bash
+# Prefix all tags with project name
+git filter-repo --tag-rename :myproject-
+
+# Before: v1.0.0, v2.0.0
+# After:  myproject-v1.0.0, myproject-v2.0.0
+```
+
+### Standardizing Tag Format
+
+```bash
+# Change from hyphen to slash
+git filter-repo --tag-rename release-:release/
+
+# Before: release-1.0, release-2.0
+# After:  release/1.0, release/2.0
+```
+
+### Removing Tag Prefix
+
+```bash
+# Remove "v" prefix from version tags
+git filter-repo --tag-rename v:
+
+# Before: v1.0.0, v2.1.0
+# After:  1.0.0, 2.1.0
+```
+
+### Adding Organization Prefix
+
+```bash
+# Add organization name
+git filter-repo --tag-rename :acme-corp-
+
+# Before: 1.0, 2.0
+# After:  acme-corp-1.0, acme-corp-2.0
+```
+
+## Advanced Tag Renaming
+
+### Multiple Tag Rename Rules
+
+Apply multiple renames sequentially:
+
+```bash
+# Not supported - only one --tag-rename allowed
+# Use --refname-callback instead for complex logic
+```
+
+### Pattern-Based Tag Renaming
+
+For complex tag renaming, use `--refname-callback`:
+
+```bash
+git filter-repo --refname-callback '
+  if refname.startswith(b"refs/tags/v"):
+    # v1.0 -> version-1.0
+    return b"refs/tags/version-" + refname[11:]
+  return refname
+'
+```
+
+[Learn more about callbacks →](/api/python-callbacks)
+
+## Branch Renaming
+
+<Note>
+`--tag-rename` only affects tags. To rename branches, use `--refname-callback`.
+</Note>
+
+### Rename Branches with Callback
+
+```bash
+git filter-repo --refname-callback '
+  if refname.startswith(b"refs/heads/feature/"):
+    # feature/xyz -> feat/xyz
+    return b"refs/heads/feat/" + refname[18:]
+  return refname
+'
+```
+
+## Reference Format
+
+Git references use the following format:
+
+- Tags: `refs/tags/tagname`
+- Branches: `refs/heads/branchname`
+- Remote branches: `refs/remotes/origin/branchname`
+
+### Tag Rename Behavior
+
+`--tag-rename` automatically handles the `refs/tags/` prefix:
+
+```bash
+# This:
+git filter-repo --tag-rename foo:bar
+
+# Internally works with:
+refs/tags/foo-1.0 -> refs/tags/bar-1.0
+```
+
+## Interaction with --partial
+
+With `--partial` flag, behavior changes:
+
+```bash
+# Normal: Replaces refs
+git filter-repo --tag-rename old:new
+# Result: refs/tags/old-1.0 deleted, refs/tags/new-1.0 created
+
+# With --partial: Creates new refs, keeps old
+git filter-repo --partial --tag-rename old:new
+# Result: refs/tags/old-1.0 kept, refs/tags/new-1.0 also created
+```
+
+<Warning>
+`--partial` creates duplicate refs, which can be confusing. Use with caution.
+</Warning>
+
+## Usage Examples
+
+### Prepare for Monorepo Merge
+
+```bash
+# Add project prefix to all tags
+git filter-repo --tag-rename :projectA-
+
+# In another repo
+cd ../projectB
+git filter-repo --tag-rename :projectB-
+
+# Now merge both into monorepo
+# No tag conflicts!
+```
+
+### Convert Tag Convention
+
+```bash
+# Convert from release/x.y.z to vx.y.z
+git filter-repo --tag-rename release/:v
+
+# Before: release/1.0.0, release/2.0.0  
+# After:  v1.0.0, v2.0.0
+```
+
+### Namespace Tags by Environment
+
+```bash
+# Prefix production tags
+git filter-repo --tag-rename :prod/
+
+# Before: v1.0, v2.0
+# After:  prod/v1.0, prod/v2.0
+```
+
+## Verification
+
+Verify tag renames:
+
+```bash
+# Before filtering
+git tag -l
+
+# After filtering
+git tag -l
+
+# Check specific tag
+git show-ref --tags
+
+# View tag details
+git show new-tag-name
+```
+
+## Important Notes
+
+<Note>
+**Lightweight vs Annotated Tags**
+
+Tag renaming works for both lightweight and annotated tags. The tag message and metadata are preserved for annotated tags.
+</Note>
+
+<Warning>
+**One Rename Rule Only**
+
+Only one `--tag-rename` option is supported. For multiple or complex renaming rules, use `--refname-callback`.
+</Warning>
+
+<Tip>
+**Testing Renames**
+
+Test tag renaming with `--dry-run`:
+```bash
+git filter-repo --tag-rename foo:bar --dry-run
+grep 'refs/tags' .git/filter-repo/fast-export.filtered
+```
+</Tip>
+
+### Tag Rename Safety
+
+Tag renaming is permanent and affects all tag references:
+
+- Old tag names are removed
+- New tag names point to the same commits (rewritten)
+- Annotated tag messages are preserved
+- Tag signatures are removed (history rewrite invalidates signatures)
+
+## Limitations
+
+### No Wildcard Support
+
+`--tag-rename` doesn't support wildcards:
+
+```bash
+# Not supported
+git filter-repo --tag-rename 'v*':'version-*'
+```
+
+Use `--refname-callback` for pattern matching.
+
+### Prefix Matching Only
+
+Only prefix replacement is supported:
+
+```bash
+# Works - prefix match
+git filter-repo --tag-rename release:prod
+# release-1.0 -> prod-1.0
+
+# Doesn't work - suffix replacement not supported
+# For this, use --refname-callback
+```
+
+### Single Rename Rule
+
+Multiple `--tag-rename` options not supported:
+
+```bash
+# Only last one takes effect
+git filter-repo --tag-rename foo:bar --tag-rename baz:qux
+```
+
+## See Also
+
+- [Callbacks →](/api/python-callbacks) - Custom ref renaming with `--refname-callback`
+- [Commit Options →](/api/commit-options) - Modify commits
+- [Path Options →](/api/path-options) - Filter and rename paths
+- [Examples →](/examples/cheat-sheet) - Real-world examples

@@ -1,0 +1,414 @@
+---
+title: 'Fresh Clone Requirements'
+description: 'Why git-filter-repo requires a fresh clone and how to override this safety check'
+icon: 'shield-check'
+---
+
+## Why Fresh Clones Are Required
+
+Since git-filter-repo does **irreversible** rewriting of history, it's critical to avoid making changes to a repository without a good backup. The primary defense is the fresh clone requirement.
+
+<Warning>
+**History rewriting cannot be undone.** Once you've rewritten history with git-filter-repo, the original commits are gone. Working from a fresh clone ensures you can always go back to the original by re-cloning.
+</Warning>
+
+## The Safety Philosophy
+
+While there's no perfect way to check if a user has a good backup, git-filter-repo asks a related question that serves as an excellent proxy:
+
+<Info>
+**"Is this repository a fresh clone?"**
+
+If yes, then the user has a backup (the original repository they cloned from).
+</Info>
+
+This is a much more reliable safety mechanism than git filter-branch's approach of writing copies of original refs to a special namespace (which most users don't know how to use for recovery).
+
+## What Defines a "Fresh Clone"?
+
+Git doesn't provide a way to definitively answer "is this a fresh clone?" but git-filter-repo checks approximately a dozen conditions that are always true of brand new clones.
+
+### Fresh Clone Checks
+
+git-filter-repo verifies that your repository:
+
+<AccordionGroup>
+  <Accordion title="1. Is fully packed">
+    A fresh clone has all objects in a single packfile, with no loose objects (or fewer than 100 if the repo is very small).
+    
+    **Check**: Number of packfiles must be 0-1, loose objects must be < 100
+  </Accordion>
+  
+  <Accordion title="2. Has exactly one remote named 'origin'">
+    Fresh clones have one remote: `origin`, pointing to where you cloned from.
+    
+    **Exception**: A brand new bare repository with no packs and no remotes is also acceptable.
+  </Accordion>
+  
+  <Accordion title="3. Has at most one reflog entry per ref">
+    Fresh clones have only one entry in each reflog (the initial clone).
+    
+    **Check**: All files in `.git/logs/` must have exactly one line.
+  </Accordion>
+  
+  <Accordion title="4. Has no stashed changes">
+    Fresh clones don't have any stashed changes.
+    
+    **Check**: `refs/stash` must not exist.
+  </Accordion>
+  
+  <Accordion title="5. Has no uncommitted changes (non-bare only)">
+    Fresh clones have a clean working directory.
+    
+    **Check**: `git diff --staged --quiet` and `git diff --quiet` both succeed.
+  </Accordion>
+  
+  <Accordion title="6. Has no untracked files (non-bare only)">
+    Fresh clones don't have any untracked files.
+    
+    **Check**: `git ls-files -o` returns nothing (excluding expected directories like `.git/`).
+  </Accordion>
+  
+  <Accordion title="7. GIT_DIR is standard">
+    Fresh clones have standard Git directory structure.
+    
+    **Check**: 
+    - Bare repos: `GIT_DIR` must be `.`
+    - Non-bare repos: `GIT_DIR` must be `.git`
+  </Accordion>
+  
+  <Accordion title="8. No refname collisions (case-insensitive filesystems)">
+    On case-insensitive filesystems (macOS, Windows), refs must not differ only by case.
+    
+    **Check**: No refs like `refs/heads/Main` and `refs/heads/main` simultaneously.
+  </Accordion>
+  
+  <Accordion title="9. No refname collisions (character-normalizing filesystems)">
+    On macOS and other normalizing filesystems, refs must not differ only in Unicode normalization.
+    
+    **Check**: No refs that normalize to the same NFC form.
+  </Accordion>
+</AccordionGroup>
+
+## False Positives and False Negatives
+
+The fresh clone check is not perfect:
+
+### False Negatives (Good Backups Rejected)
+
+Someone might have a perfectly good backup without it being a fresh clone. For example:
+- A repository where you've already made a backup elsewhere
+- A repository you've carefully maintained and want to filter
+- A bare repository you've prepared specifically for filtering
+
+<Info>
+This is okay! You can use `--force` to override the check when you're confident you have a backup.
+</Info>
+
+### False Positives (Bad Repos Accepted)
+
+Someone could theoretically manipulate a repository to pass all the checks:
+- Repack everything into a single packfile
+- Remove all but one remote and rename it to origin
+- Truncate all reflogs to one entry
+- Clean the working directory
+
+However:
+1. This requires significant effort
+2. It's astronomically unlikely to happen by accident
+3. Someone going to this effort presumably knows what they're doing
+
+<Note>
+In practice, the safety checks are excellent at catching accidental runs on repositories you shouldn't be filtering. They even caught the tool's author once when running in the wrong directory!
+</Note>
+
+## How to Create a Fresh Clone
+
+The proper way to create a fresh clone for filtering:
+
+<CodeGroup>
+```bash Standard clone
+# For remote repositories
+git clone https://github.com/user/repo.git repo-to-filter
+cd repo-to-filter
+```
+
+```bash Local clone (IMPORTANT!)
+# When cloning from a local repository, MUST use --no-local
+git clone --no-local /path/to/original repo-to-filter
+cd repo-to-filter
+
+# Without --no-local, Git hardlinks objects instead of copying them,
+# which can confuse the fresh clone check
+```
+
+```bash Bare clone
+# For bare repositories
+git clone --bare https://github.com/user/repo.git repo-to-filter.git
+cd repo-to-filter.git
+```
+
+```bash Mirror clone
+# For exact mirror including all refs
+git clone --mirror https://github.com/user/repo.git repo-to-filter.git
+cd repo-to-filter.git
+```
+</CodeGroup>
+
+<Warning>
+**Critical**: When cloning local repositories, always use `--no-local`!
+
+```bash Wrong
+git clone /path/to/repo new-repo
+# Uses hardlinks, not a real copy
+```
+
+```bash Correct
+git clone --no-local /path/to/repo new-repo
+# Creates real copies of objects
+```
+</Warning>
+
+## Using `--force` to Override
+
+If you're not in a fresh clone but want to proceed anyway, use `--force`:
+
+```bash Override the safety check
+git filter-repo --path src/ --force
+```
+
+<Warning>
+**When it's okay to use `--force`:**
+- You have a verified backup elsewhere
+- You understand history rewriting is irreversible
+- You're confident you're in the right directory
+- You're okay with git-filter-repo irreversibly rewriting the current repository
+
+**When it's NOT okay to use `--force`:**
+- "I don't want to bother making a fresh clone"
+- You're not sure if you have a backup
+- You're recommending it to others without explanation
+- You habitually use it without thinking
+</Warning>
+
+### Don't Habitually Use `--force`
+
+<Warning>
+**Do not** get in the habit of always specifying `--force`!
+
+If you do, one day you will run your command in the wrong directory (it happens to everyone), and you won't have the safety check to bail you out. You'll irrevocably destroy a repository you didn't mean to.
+</Warning>
+
+### Don't Recommend `--force` Carelessly
+
+When helping others on forums, Q&A sites, or in emails:
+
+<Warning>
+**Never** recommend `--force` without first:
+1. Explaining that it means putting their repository's data at risk
+2. Confirming they have a backup
+3. Ensuring they understand history rewriting is irreversible
+
+People who suggest `--force` when it's clearly not needed are needlessly putting other people's data at risk.
+</Warning>
+
+## Common Error Messages
+
+When the fresh clone check fails, you'll see errors like:
+
+<CodeGroup>
+```text Expected freshly packed repo
+Aborting: Refusing to destructively overwrite repo history since
+this does not look like a fresh clone.
+  (expected freshly packed repo)
+Please operate on a fresh clone instead. If you want to proceed
+anyway, use --force.
+```
+
+```text Expected one remote, origin  
+Aborting: Refusing to destructively overwrite repo history since
+this does not look like a fresh clone.
+  (expected one remote, origin)
+Please operate on a fresh clone instead. If you want to proceed
+anyway, use --force.
+```
+
+```text Has uncommitted changes
+Aborting: Refusing to destructively overwrite repo history since
+this does not look like a fresh clone.
+  (you have uncommitted changes)
+Please operate on a fresh clone instead. If you want to proceed
+anyway, use --force.
+```
+</CodeGroup>
+
+Each error tells you exactly which check failed.
+
+## Special Case: Cloning Local Repositories
+
+When the repository you're cloning is on the local filesystem, you **must** use `--no-local`:
+
+```bash Required flag for local clones
+git clone --no-local /path/to/original repo-to-filter
+```
+
+If you forget, you might see:
+
+```text Error message
+Note: when cloning local repositories, you need to pass
+      --no-local to git clone to avoid this issue.
+
+Aborting: Refusing to destructively overwrite repo history since
+this does not look like a fresh clone.
+  (expected freshly packed repo)
+...
+```
+
+<Info>
+**Why `--no-local` is required:**
+
+By default, `git clone` uses hardlinks when cloning local repositories for efficiency. This means objects aren't really copied—they're shared via filesystem links.
+
+This causes two problems:
+1. The clone doesn't look "fresh" (shared objects appear as loose objects)
+2. Filtering the clone can actually corrupt the original (since they share objects)
+
+Using `--no-local` forces Git to copy objects, creating a true independent clone.
+</Info>
+
+## Recommended Workflow
+
+The safe, recommended workflow for using git-filter-repo:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone --no-local /path/to/original repo-to-filter
+    cd repo-to-filter
+    ```
+    
+    (Use `--no-local` for local repos, omit for remote repos)
+  </Step>
+  
+  <Step title="(Optional) Analyze the repository">
+    ```bash
+    git filter-repo --analyze
+    less .git/filter-repo/analysis/path-all-sizes.txt
+    ```
+    
+    This helps you understand what to filter.
+  </Step>
+  
+  <Step title="Run git-filter-repo">
+    ```bash
+    git filter-repo --path src/ --path docs/
+    ```
+    
+    No `--force` needed—it detects this is a fresh clone.
+  </Step>
+  
+  <Step title="Verify the results">
+    ```bash
+    git log --all --oneline
+    git ls-files
+    # Check that only desired files remain
+    ```
+  </Step>
+  
+  <Step title="If satisfied, push to new location">
+    ```bash
+    git remote add origin https://github.com/user/new-filtered-repo.git
+    git push -u origin --all
+    git push -u origin --tags
+    ```
+  </Step>
+  
+  <Step title="If not satisfied, delete and try again">
+    ```bash
+    cd ..
+    rm -rf repo-to-filter
+    # Start over from step 1
+    ```
+    
+    This is why working from a fresh clone is safe!
+  </Step>
+</Steps>
+
+## Real-World Examples
+
+### Example 1: Safe filtering
+
+```bash Success case
+# Clone fresh
+git clone https://github.com/myorg/myrepo.git myrepo-filtered
+cd myrepo-filtered
+
+# Filter (no --force needed)
+git filter-repo --path important-code/
+# ✓ Works perfectly
+```
+
+### Example 2: Caught by safety check
+
+```bash Prevented mistake
+# Working in my main repo (not a fresh clone)
+cd ~/projects/myrepo
+
+# Try to filter
+git filter-repo --path src/
+# ✗ Error: expected one remote, origin
+# ✓ Safety check prevented accidental data loss!
+```
+
+### Example 3: Legitimate `--force` usage
+
+```bash With backup
+# Made a backup manually
+cp -r myrepo myrepo-backup
+cd myrepo
+
+# Filter with --force (I have a backup)
+git filter-repo --path src/ --force
+# ✓ Acceptable: explicit --force with known backup
+```
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="Why can't I just filter my existing repository?">
+    Because if something goes wrong, you have no way to recover. History rewriting is irreversible. A fresh clone ensures you can always go back to the original.
+  </Accordion>
+  
+  <Accordion title="I have a backup, why do I still need a fresh clone?">
+    You don't—use `--force`. But be absolutely sure your backup is complete and current.
+  </Accordion>
+  
+  <Accordion title="Can I bypass the check permanently?">
+    No, and you shouldn't want to. The check exists to protect you. Use `--force` when you're certain, but don't disable the safety net.
+  </Accordion>
+  
+  <Accordion title="Does `--force` make it unsafe?">
+    `--force` doesn't make the filtering itself unsafe—it just disables the check that you have a backup. The filtering is just as safe; you just might not have a way to recover if something goes wrong.
+  </Accordion>
+  
+  <Accordion title="What if I'm using a CI/CD environment?">
+    In CI/CD, you're typically cloning fresh on each run, so the check should pass. If your CI setup doesn't look like a fresh clone, you may need to use `--force` or adjust your CI configuration to do a proper clone.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Start using git-filter-repo with step-by-step examples
+  </Card>
+  <Card title="How It Works" icon="gear" href="/concepts/how-it-works">
+    Understand the technical architecture
+  </Card>
+  <Card title="Design Rationale" icon="compass" href="/concepts/design-rationale">
+    Learn about all 12 design goals
+  </Card>
+  <Card title="Common Tasks" icon="list-check" href="/use-cases/removing-sensitive-data">
+    See real-world filtering examples
+  </Card>
+</CardGroup>

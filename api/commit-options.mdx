@@ -1,0 +1,362 @@
+---
+title: 'Commit Modification Options'
+description: 'Options for modifying commit messages, author information, and commit ancestry'
+---
+
+# Commit Modification Options
+
+Options for modifying commit messages, author/committer names and emails, and controlling how commit ancestry is rewritten.
+
+## Commit Message Options
+
+### --replace-message
+
+<ParamField path="--replace-message" type="string">
+  Replace text patterns in commit and tag messages.
+  
+  **Type:** Path to expressions file
+  
+  **Format:** Same syntax as `--replace-text`
+  
+  **Applies to:** Commit messages and annotated tag messages
+  
+  **Example expressions file (message-replacements.txt):**
+  ```
+  # Remove sensitive references
+  SECRET_TICKET_ID
+  
+  # Replace old issue tracker URLs
+  regex:https://oldtracker\.com/issue/([0-9]+)==>https://newtracker.com/issues/\1
+  
+  # Update old email domain
+  glob:*@oldcompany.com==>*@newcompany.com
+  ```
+  
+  **Usage:**
+  ```bash
+  git filter-repo --replace-message message-replacements.txt
+  ```
+</ParamField>
+
+### --preserve-commit-hashes
+
+<ParamField path="--preserve-commit-hashes" type="boolean" default="false">
+  Don't update commit hash references in commit messages.
+  
+  **Default behavior:** Commit hash references are automatically updated to new hashes
+  
+  **With this flag:** Old commit hash references remain unchanged
+  
+  By default, git-filter-repo automatically finds commit hash references in messages and updates them to the new post-rewrite hashes, preserving the original abbreviation length.
+  
+  **Example:**
+  ```bash
+  # Don't update hash references
+  git filter-repo --path src/ --preserve-commit-hashes
+  ```
+  
+  <Note>
+  Use this if you want to preserve original commit references, or if automatic hash updating causes issues.
+  </Note>
+</ParamField>
+
+### --preserve-commit-encoding
+
+<ParamField path="--preserve-commit-encoding" type="boolean" default="false">
+  Don't re-encode commit messages to UTF-8.
+  
+  **Default behavior:** Messages are re-encoded to UTF-8 if commit object specifies different encoding
+  
+  **With this flag:** Original encoding is preserved
+  
+  **Requires:** Git >= 2.23.0
+  
+  **Example:**
+  ```bash
+  git filter-repo --preserve-commit-encoding
+  ```
+</ParamField>
+
+## Names and Emails
+
+### --mailmap
+
+<ParamField path="--mailmap" type="string">
+  Apply mailmap file to rewrite author, committer, and tagger names/emails.
+  
+  **Type:** Path to mailmap file
+  
+  **Format:** See `git-shortlog(1)` for mailmap format
+  
+  **Applies to:** Authors, committers, and taggers
+  
+  **Example mailmap file (.mailmap):**
+  ```
+  # Consolidate different name spellings
+  Proper Name <proper@email.com> <old@email.com>
+  Proper Name <proper@email.com> Old Name <old@email.com>
+  
+  # Update company email domain
+  <new@company.com> <old@company.com>
+  
+  # Fix typo in name
+  Correct Name <email@company.com> Typoed Name <email@company.com>
+  ```
+  
+  **Usage:**
+  ```bash
+  git filter-repo --mailmap .mailmap
+  ```
+  
+  <Note>
+  If the mailmap file is tracked in git history, only its current contents are used (historical versions are ignored).
+  </Note>
+</ParamField>
+
+### --use-mailmap
+
+<ParamField path="--use-mailmap" type="boolean">
+  Use the `.mailmap` file from the repository.
+  
+  **Equivalent to:** `--mailmap .mailmap`
+  
+  **Example:**
+  ```bash
+  git filter-repo --use-mailmap
+  ```
+</ParamField>
+
+## Parent Rewriting
+
+Options that control how commit ancestry is modified during filtering.
+
+### --replace-refs
+
+<ParamField path="--replace-refs" type="string" default="update-no-add">
+  Control how replace refs are handled.
+  
+  **Type:** Choice of strategy
+  
+  **Options:**
+  - `delete-no-add` - Delete existing replace refs, don't add new ones
+  - `delete-and-add` - Delete existing, add new for all rewrites
+  - `update-no-add` - Update existing, don't add new (DEFAULT)
+  - `update-or-add` - Update existing, add only if referenced by existing replace ref
+  - `update-and-add` - Update existing, add new for all rewrites
+  - `old-default` - Use pre-2.45 default behavior
+  
+  Replace refs allow using old commit IDs with git commands after history rewrite.
+  
+  **Example:**
+  ```bash
+  # Create replace refs for all rewrites
+  git filter-repo --replace-refs delete-and-add
+  ```
+  
+  <Note>
+  Replace refs must be manually pushed and fetched. See `git-replace(1)` for details.
+  </Note>
+</ParamField>
+
+### --prune-empty
+
+<ParamField path="--prune-empty" type="string" default="auto">
+  Whether to prune commits that become empty.
+  
+  **Type:** Choice of strategy
+  
+  **Options:**
+  - `always` - Prune all empty commits (even originally empty ones)
+  - `auto` - Only prune commits that become empty due to filtering (DEFAULT)
+  - `never` - Keep all commits, even if empty
+  
+  **What is an empty commit?**
+  A commit with no file changes compared to its parent.
+  
+  **Default behavior (`auto`):**
+  - Prunes commits that become empty due to filtering
+  - Keeps commits that were originally empty
+  - When parent is pruned, first non-pruned ancestor becomes new parent
+  
+  **Example:**
+  ```bash
+  # Remove all empty commits
+  git filter-repo --prune-empty always
+  
+  # Keep all commits even if they become empty
+  git filter-repo --path src/ --prune-empty never
+  ```
+</ParamField>
+
+### --prune-degenerate
+
+<ParamField path="--prune-degenerate" type="string" default="auto">
+  Whether to prune merge commits that become degenerate.
+  
+  **Type:** Choice of strategy
+  
+  **Options:**
+  - `always` - Prune all degenerate merges (even originally degenerate)
+  - `auto` - Only prune merges that become degenerate due to filtering (DEFAULT)
+  - `never` - Keep all merge commits
+  
+  **What is a degenerate merge?**
+  A merge commit that:
+  - Has fewer than two parents, OR
+  - Has the same commit as both parents, OR
+  - Has one parent that is an ancestor of the other
+  
+  **Default behavior (`auto`):**
+  - Merge commits normally exempt from pruning (for topology)
+  - Prunes merges that become degenerate AND have no file changes
+  - Only prunes merges that become degenerate, not those that started degenerate
+  
+  **Example:**
+  ```bash
+  # Prune all degenerate merges
+  git filter-repo --prune-degenerate always
+  ```
+</ParamField>
+
+### --no-ff
+
+<ParamField path="--no-ff" type="boolean" default="false">
+  Preserve first parent even if it becomes an ancestor of another parent.
+  
+  **Effect:** Modifies `--prune-degenerate` behavior
+  
+  **Use case:** Projects that always use `git merge --no-ff`
+  
+  Normally, if first parent becomes an ancestor of another parent in a merge, that first parent might be pruned (depending on `--prune-degenerate`). This flag prevents that.
+  
+  **Example:**
+  ```bash
+  # Preserve merge commit topology
+  git filter-repo --no-ff
+  ```
+</ParamField>
+
+## Usage Examples
+
+### Update Commit Messages
+
+**Create replacements file (messages.txt):**
+```
+# Update old ticket references
+regex:JIRA-([0-9]+)==>GH-\1
+
+# Remove sensitive notes
+Sensitive: DO NOT SHARE
+
+# Update old URLs
+regex:http://oldserver\.com==https://newserver.com
+```
+
+**Apply replacements:**
+```bash
+git filter-repo --replace-message messages.txt
+```
+
+### Consolidate Author Names
+
+**Create mailmap file (.mailmap):**
+```
+John Doe <john@company.com> <john.doe@oldcompany.com>
+John Doe <john@company.com> Johnny Doe <johnny@oldcompany.com>
+Jane Smith <jane@company.com> <jsmith@contractor.com>
+```
+
+**Apply mailmap:**
+```bash
+git filter-repo --mailmap .mailmap
+```
+
+### Aggressive Pruning
+
+```bash
+# Remove all empty commits and degenerate merges
+git filter-repo \
+  --path src/ \
+  --prune-empty always \
+  --prune-degenerate always
+```
+
+### Preserve History Topology
+
+```bash
+# Keep all commits and merges, even if empty
+git filter-repo \
+  --path src/ \
+  --prune-empty never \
+  --prune-degenerate never
+```
+
+### Create Replace Refs for Old Hashes
+
+```bash
+# Allow using old commit IDs after rewrite
+git filter-repo --replace-refs delete-and-add
+
+# Push replace refs to allow others to use them
+git push origin 'refs/replace/*'
+
+# Users can fetch them with:
+# git config --add remote.origin.fetch '+refs/replace/*:refs/replace/*'
+# git fetch origin
+```
+
+## Mailmap Format
+
+The mailmap file format (from `git-shortlog`):
+
+```
+# Proper Name and Email
+Proper Name <proper@email.com>
+
+# Just email replacement
+<new@email.com> <old@email.com>
+
+# Both name and email replacement
+Proper Name <proper@email.com> Commit Name <commit@email.com>
+
+# Multiple old identities -> one new identity
+Proper Name <proper@email.com> <old1@email.com>
+Proper Name <proper@email.com> <old2@email.com>
+Proper Name <proper@email.com> Old Name <old@email.com>
+
+# Comments
+# Lines starting with # are ignored
+```
+
+## Important Notes
+
+<Warning>
+**Commit Hash Rewriting**
+
+When commits are rewritten, they get new hashes. References to old hashes in commit messages are automatically updated unless `--preserve-commit-hashes` is used.
+</Warning>
+
+<Note>
+**Empty Commit Handling**
+
+The default `--prune-empty auto` is usually what you want:
+- Keeps originally empty commits (intentional, like "WIP" commits)
+- Removes commits that become empty due to filtering
+</Note>
+
+<Tip>
+**Testing Message Replacements**
+
+Test with `--dry-run` first:
+```bash
+git filter-repo --replace-message msg.txt --dry-run
+cat .git/filter-repo/fast-export.filtered
+```
+</Tip>
+
+## See Also
+
+- [Content Options →](/api/content-options) - Replace text in file contents
+- [Ref Options →](/api/ref-options) - Rename branches and tags
+- [Callbacks →](/api/python-callbacks) - Custom commit processing
+- [Examples →](/examples/cheat-sheet) - Real-world examples

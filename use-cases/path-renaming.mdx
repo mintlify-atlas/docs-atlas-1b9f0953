@@ -1,0 +1,289 @@
+---
+title: Path Renaming
+description: Rename and reorganize files and directories throughout Git history
+---
+
+git-filter-repo makes it easy to rename files, directories, and entire directory structures throughout your repository's history.
+
+## Simple Path Renaming
+
+Rename a single file throughout history:
+
+```bash
+git filter-repo --path-rename old-name.txt:new-name.txt
+```
+
+## Rename Directories
+
+Move or rename an entire directory:
+
+```bash
+# Rename a directory
+git filter-repo --path-rename old-dir/:new-dir/
+
+# Move a directory to a different location
+git filter-repo --path-rename src/components/:lib/ui/
+```
+
+<Note>
+  Include the trailing slash when renaming directories to ensure all files within are renamed correctly.
+</Note>
+
+## Multiple Renames
+
+Perform several rename operations at once:
+
+```bash
+git filter-repo \
+    --path-rename src/:lib/ \
+    --path-rename tests/:spec/ \
+    --path-rename README.txt:README.md
+```
+
+## Moving Root to Subdirectory
+
+Make the entire repository root become a subdirectory:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/example/repo.git
+    cd repo
+    ```
+  </Step>
+
+  <Step title="Move to subdirectory">
+    ```bash
+    git filter-repo --to-subdirectory-filter my-module
+    ```
+    
+    All files that were at the root (like `README.md`) will now be at `my-module/README.md`.
+  </Step>
+</Steps>
+
+## Combining Extraction and Renaming
+
+Extract a subdirectory and rename it:
+
+```bash
+git filter-repo \
+    --path src/some-folder/some-feature/ \
+    --path-rename src/some-folder/some-feature/:src/
+```
+
+This:
+1. Keeps only `src/some-folder/some-feature/`
+2. Renames it to `src/`
+3. Removes everything else
+
+## Complex Reorganization Example
+
+Restructure a repository layout:
+
+<Steps>
+  <Step title="Plan the reorganization">
+    Original structure:
+    ```
+    app/
+    test/
+    docs/
+    ```
+    
+    Desired structure:
+    ```
+    src/
+    tests/
+    documentation/
+    ```
+  </Step>
+
+  <Step title="Apply multiple renames">
+    ```bash
+    git filter-repo \
+        --path-rename app/:src/ \
+        --path-rename test/:tests/ \
+        --path-rename docs/:documentation/
+    ```
+  </Step>
+</Steps>
+
+## Using Paths File for Renames
+
+For many renames, use a paths file with `==>` syntax:
+
+<Steps>
+  <Step title="Create paths file">
+    Create `../renames.txt`:
+    ```
+    old/path/file1.txt==>new/path/file1.txt
+    src/old/==>src/new/
+    legacy/==>archived/legacy/
+    ```
+  </Step>
+
+  <Step title="Apply renames">
+    ```bash
+    git filter-repo --paths-from-file ../renames.txt
+    ```
+  </Step>
+</Steps>
+
+## Advanced: Callback-Based Renaming
+
+For complex renaming logic, use Python callbacks:
+
+### Rename by pattern
+
+```bash
+git filter-repo --filename-callback '
+    # Add a prefix to all files
+    return b"legacy-" + filename
+'
+```
+
+### Conditional renaming
+
+```bash
+git filter-repo --filename-callback '
+    # Move all .js files to src/
+    if filename.endswith(b".js"):
+        return b"src/" + filename
+    return filename
+'
+```
+
+### Replace path components
+
+```bash
+git filter-repo --filename-callback '
+    # Replace "old" with "new" in all paths
+    return filename.replace(b"/old/", b"/new/")
+'
+```
+
+## Renaming with Extraction
+
+Combine path selection with renaming:
+
+```bash
+# Keep only src/ and rename it to lib/
+git filter-repo --path src/ --path-rename src/:lib/
+```
+
+## Tag Renaming
+
+Rename tags to avoid conflicts when merging:
+
+```bash
+# Add prefix to all tags
+git filter-repo --tag-rename '':'my-project-'
+
+# This renames:
+# v1.0 -> my-project-v1.0
+# v2.0 -> my-project-v2.0
+```
+
+## Complete Example: Repository Merge Preparation
+
+Prepare a repository for merging by reorganizing and prefixing:
+
+<Steps>
+  <Step title="Clone fresh">
+    ```bash
+    git clone https://github.com/example/module.git
+    cd module
+    ```
+  </Step>
+
+  <Step title="Extract and reorganize">
+    ```bash
+    git filter-repo \
+        --path src/ \
+        --to-subdirectory-filter modules/extracted \
+        --tag-rename '':'extracted-module-'
+    ```
+    
+    This:
+    - Keeps only the `src/` directory
+    - Moves everything to `modules/extracted/src/`
+    - Prefixes all tags with `extracted-module-`
+  </Step>
+
+  <Step title="Verify changes">
+    ```bash
+    ls -la
+    git log --oneline --all
+    git tag
+    ```
+  </Step>
+</Steps>
+
+## Handle Special Cases
+
+### Rename preserving directory structure
+
+```bash
+# Move all Python files to a src/ directory while preserving their relative paths
+git filter-repo --filename-callback '
+    if filename.endswith(b".py"):
+        return b"src/" + filename
+    return filename
+'
+```
+
+### Case-sensitive rename
+
+```bash
+# Rename README to readme (careful on case-insensitive filesystems)
+git filter-repo --path-rename README.md:readme.md
+```
+
+<Warning>
+  On case-insensitive filesystems (macOS, Windows), renaming files that differ only in case requires extra care. git-filter-repo handles this, but be cautious when pushing to remotes.
+</Warning>
+
+## Verify Renames
+
+After renaming, verify the changes:
+
+```bash
+# Check that old paths don't exist
+git log --all --full-history -- old/path/
+
+# Verify new paths have history
+git log --follow new/path/file.txt
+
+# Compare file count
+git ls-tree -r HEAD --name-only | wc -l
+```
+
+## Common Patterns
+
+### Flatten directory structure
+
+```bash
+# Move all files from nested directories to root
+git filter-repo --filename-callback '
+    import os
+    return os.path.basename(filename)
+'
+```
+
+<Warning>
+  Flattening can cause filename conflicts if multiple files have the same name in different directories.
+</Warning>
+
+### Add date prefix to directories
+
+```bash
+git filter-repo --path-rename src/:2024-01-15-src/
+```
+
+### Normalize path separators
+
+```bash
+# Convert backslashes to forward slashes (from Windows)
+git filter-repo --filename-callback '
+    return filename.replace(b"\\", b"/")
+'
+```

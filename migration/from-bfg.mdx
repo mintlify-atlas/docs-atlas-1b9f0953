@@ -1,0 +1,474 @@
+---
+title: Migrating from BFG Repo Cleaner
+description: Complete guide for converting BFG Repo Cleaner commands to git-filter-repo
+---
+
+This guide is for users familiar with BFG Repo Cleaner who want to migrate to `git-filter-repo`. We'll show you how to convert your existing commands and understand the key differences between the tools.
+
+## Quick Reference
+
+BFG and filter-repo have different architectures:
+- **BFG**: Operates directly on Git tree objects using file basenames
+- **filter-repo**: Operates on fast-export stream using full file paths
+
+<Note>
+BFG expects the repository path as a final argument (`java -jar bfg.jar ... my-repo.git`), while filter-repo expects you to `cd` into the repository first.
+</Note>
+
+## Half-Hearted Conversions
+
+You can quickly convert most BFG commands by replacing `java -jar bfg.jar` with [`bfg-ish`](https://github.com/newren/git-filter-repo/blob/main/contrib/filter-repo-demos/bfg-ish):
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    java -jar bfg.jar --strip-blobs-bigger-than 100M repo.git
+    ```
+  </Tab>
+  <Tab title="bfg-ish">
+    ```bash
+    cd repo.git
+    bfg-ish --strip-blobs-bigger-than 100M
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+bfg-ish provides bug fixes and features on top of BFG, but native filter-repo commands offer more capabilities and flexibility.
+</Info>
+
+## Key Differences
+
+### Path Handling
+
+**BFG** operates on basenames only:
+- Cannot distinguish `README.md` in root vs. subdirectory
+- Cannot rename files or directories
+- Limited to basename-based filtering
+
+**filter-repo** uses full paths:
+- Precise control over specific files at any path
+- Supports file and directory renaming
+- Enables complex restructuring operations
+
+### Object Handling
+
+**BFG** directly manipulates tree objects:
+- Issues with loose vs. packed objects
+- Doesn't understand replace refs or grafts
+- Limited index and working tree handling
+
+**filter-repo** leverages fast-export/fast-import:
+- Automatic handling of packed/loose objects and refs
+- Built-in support for replace refs and grafts
+- Proper index and working tree updates
+- Automatic garbage collection
+
+### Protection & Privacy Defaults
+
+BFG's "protection" and "privacy" defaults have been intentionally excluded from filter-repo:
+
+<Warning>
+**Major differences from BFG:**
+- Filters apply to **HEAD** (no weird disconnects)
+- No `[formerly OLDHASH]` munging in messages
+- No `Former-commit-id:` footers in messages  
+- No `<filename>.REMOVED.git-id` litter files
+
+filter-repo uses **replace refs** for looking up old commit hashes, which is cleaner and more Git-native.
+</Warning>
+
+## Command Conversions
+
+### Stripping Large Blobs
+
+Remove files larger than a specified size:
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    java -jar bfg.jar --strip-blobs-bigger-than 100M some-big-repo.git
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    cd some-big-repo.git
+    git filter-repo --strip-blobs-bigger-than 100M
+    ```
+  </Tab>
+</Tabs>
+
+### Deleting Specific Files
+
+Remove files by name:
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    java -jar bfg.jar --delete-files id_{dsa,rsa} my-repo.git
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    cd my-repo.git
+    git filter-repo --use-base-name \
+      --path id_dsa --path id_rsa --invert-paths
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The `--use-base-name` flag makes filter-repo behave like BFG by matching against file basenames instead of full paths.
+</Note>
+
+### Removing Sensitive Content
+
+Replace passwords and secrets using a replacement file:
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    java -jar bfg.jar --replace-text passwords.txt my-repo.git
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    cd my-repo.git
+    git filter-repo --replace-text passwords.txt
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+The `--replace-text` feature was originally created by BFG and implemented in filter-repo with better documentation. filter-repo's docs provide more detail on the file format.
+</Info>
+
+#### Regex Replacement Difference
+
+<Warning>
+**Important difference in regex replacements:**
+
+When using both `regex:` and `==>` on a single line:
+- **BFG**: Uses `$1`, `$2`, `$3` for capture groups (Scala style)
+- **filter-repo**: Uses `\1`, `\2`, `\3` for capture groups (Python style)
+</Warning>
+
+<Tabs>
+  <Tab title="BFG passwords.txt">
+    ```
+    regex:password\s*=\s*(\S+)==>password=***REMOVED***
+    regex:api[_-]?key['"]?\s*:\s*['"]?([^'"\s]+)==>api_key: $1
+    ```
+  </Tab>
+  <Tab title="filter-repo passwords.txt">
+    ```
+    regex:password\s*=\s*(\S+)==>password=***REMOVED***
+    regex:api[_-]?key['"]?\s*:\s*['"]?([^'"\s]+)==>api_key: \1
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The bfg-ish script automatically translates `$1`, `$2` to `\1`, `\2` for compatibility.
+</Note>
+
+### Removing Files and Folders by Name
+
+Remove all files/folders with a specific name throughout history:
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    java -jar bfg.jar --delete-folders .git \
+      --delete-files .git --no-blob-protection my-repo.git
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    cd my-repo.git
+    git filter-repo --invert-paths \
+      --path-glob '*/.git' --path .git
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+**About the glob pattern:**
+- `--path-glob '*/.git'` matches `.git` directories one or more levels deep
+- Uses **Git-style globs**, not shell-style globs
+- `--path .git` added separately to catch top-level `.git` (since the glob has `/`)
+</Info>
+
+## Understanding Path Patterns
+
+Since filter-repo uses full paths, you have more control but need to be more specific:
+
+### Match by Basename (BFG-style)
+
+<Tabs>
+  <Tab title="Match anywhere">
+    ```bash
+    # Remove "secrets.txt" anywhere in the tree
+    git filter-repo --use-base-name --path secrets.txt --invert-paths
+    ```
+  </Tab>
+  <Tab title="Specific path">
+    ```bash
+    # Remove only "config/secrets.txt"
+    git filter-repo --path config/secrets.txt --invert-paths
+    ```
+  </Tab>
+</Tabs>
+
+### Using Globs
+
+<Tabs>
+  <Tab title="Subdirectories">
+    ```bash
+    # Remove .env files in any subdirectory
+    git filter-repo --path-glob '*/.env' --invert-paths
+    ```
+  </Tab>
+  <Tab title="All levels">
+    ```bash
+    # Remove .env files anywhere (including root)
+    git filter-repo --path-glob '**/.env' --path .env --invert-paths
+    ```
+  </Tab>
+  <Tab title="Extensions">
+    ```bash
+    # Remove all .log files
+    git filter-repo --path-glob '*.log' --invert-paths
+    ```
+  </Tab>
+</Tabs>
+
+## Feature Comparison
+
+### What BFG Does That filter-repo Doesn't
+
+<Card title="Protection Features (Intentionally Excluded)" icon="shield">
+  BFG's HEAD protection and privacy footers have been excluded from filter-repo:
+  
+  - **No HEAD protection**: Filters apply everywhere for consistency
+  - **No Former-commit-id**: Use replace refs instead
+  - **No .REMOVED.git-id files**: Cleaner history without artifacts
+  
+  These decisions make filter-repo more predictable and Git-native.
+</Card>
+
+### What filter-repo Does That BFG Doesn't
+
+<CardGroup cols={2}>
+  <Card title="Path-Based Operations" icon="folder-tree">
+    - Rename files and directories
+    - Move files between paths
+    - Filter by full path, not just basename
+    - Complex directory restructuring
+  </Card>
+  
+  <Card title="Advanced Filtering" icon="code">
+    - Python callbacks for custom logic
+    - Commit message rewriting
+    - Author/committer updates
+    - Partial history rewrites
+  </Card>
+  
+  <Card title="Better Integration" icon="git">
+    - Replace refs and grafts support
+    - Index and working tree updates
+    - Automatic garbage collection
+    - Packed/loose object handling
+  </Card>
+  
+  <Card title="Safety Features" icon="lock">
+    - Refuses to run on dirty repos
+    - Creates backups by default
+    - Validates before execution
+    - Better error messages
+  </Card>
+</CardGroup>
+
+## Migration Patterns
+
+### Common BFG Use Case: Clean Secrets
+
+<Tabs>
+  <Tab title="BFG Workflow">
+    ```bash
+    # Clone a fresh copy
+    git clone --mirror https://github.com/user/repo.git
+    cd repo.git
+    
+    # Clean with BFG
+    java -jar bfg.jar --replace-text passwords.txt
+    java -jar bfg.jar --delete-files id_rsa
+    java -jar bfg.jar --strip-blobs-bigger-than 50M
+    
+    # Clean up
+    git reflog expire --expire=now --all
+    git gc --prune=now --aggressive
+    
+    # Push
+    git push
+    ```
+  </Tab>
+  <Tab title="filter-repo Workflow">
+    ```bash
+    # Clone a fresh copy
+    git clone https://github.com/user/repo.git
+    cd repo
+    
+    # Clean with filter-repo (single command)
+    git filter-repo \
+      --replace-text passwords.txt \
+      --path id_rsa --invert-paths \
+      --strip-blobs-bigger-than 50M
+    
+    # Push (set up remote first)
+    git remote add origin https://github.com/user/repo.git
+    git push --force --all
+    git push --force --tags
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+filter-repo automatically handles garbage collection, so no manual cleanup commands needed!
+</Note>
+
+### Common BFG Use Case: Extract Subdirectory
+
+<Tabs>
+  <Tab title="BFG">
+    ```bash
+    # BFG can't do this directly
+    # Would need to delete everything else by listing all other paths
+    ```
+  </Tab>
+  <Tab title="filter-repo">
+    ```bash
+    # Simple and direct
+    git filter-repo --subdirectory-filter myproject/subdir
+    ```
+  </Tab>
+</Tabs>
+
+## Migration Tips
+
+### Testing Your Migration
+
+1. **Clone first**: Always work on a fresh clone
+   ```bash
+   git clone --mirror https://example.com/repo.git
+   cd repo.git
+   ```
+
+2. **Test the command**: Run filter-repo with `--dry-run` if testing
+   ```bash
+   git filter-repo --path secrets.txt --invert-paths --dry-run
+   ```
+
+3. **Verify results**: Check that sensitive data is gone
+   ```bash
+   git log --all --full-history -- secrets.txt  # Should be empty
+   ```
+
+### Understanding the Output
+
+filter-repo provides detailed statistics after completion:
+
+```
+Parsed 1234 commits
+  New history written in 2.34 seconds
+  Completely finished after 3.12 seconds.
+```
+
+### Force Pushing After Migration
+
+<Warning>
+**Coordinate with your team!** History rewriting requires force-pushing and affects all collaborators.
+</Warning>
+
+```bash
+# Set up remote (filter-repo removes them for safety)
+git remote add origin https://github.com/user/repo.git
+
+# Force push all branches and tags
+git push --force --all
+git push --force --tags
+```
+
+### Post-Migration Checklist
+
+<Steps>
+  <Step title="Verify sensitive data removal">
+    Search for sensitive patterns in the new history
+    ```bash
+    git grep -i password $(git rev-list --all)
+    ```
+  </Step>
+  
+  <Step title="Test repository functionality">
+    Clone the rewritten repo and ensure it works correctly
+  </Step>
+  
+  <Step title="Update CI/CD">
+    Update any hardcoded commit SHAs in CI/CD pipelines
+  </Step>
+  
+  <Step title="Notify collaborators">
+    Everyone must re-clone or reset their local repositories
+    ```bash
+    # Collaborators should:
+    cd old-repo
+    git fetch origin
+    git reset --hard origin/main
+    ```
+  </Step>
+  
+  <Step title="Update GitHub/GitLab">
+    Update protected branches and any GitHub Actions that reference specific commits
+  </Step>
+</Steps>
+
+## When to Use Each Tool
+
+### Use filter-repo when:
+- You need path-based filtering (rename, move files)
+- You want automatic cleanup and optimization
+- You need Python callbacks for complex logic
+- You want better Git integration
+
+### Use bfg-ish when:
+- You have existing BFG commands to maintain
+- You only need basename filtering
+- You prefer BFG's command syntax
+
+### Use BFG when:
+- You specifically need JVM-based tooling
+- You have complex Scala-based customizations
+
+<Tip>
+For most users, **filter-repo is recommended** as it's faster, more capable, and better maintained.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cookbook" icon="book" href="/examples/cheat-sheet">
+    Common filtering patterns and recipes
+  </Card>
+  
+  <Card title="Path Filtering" icon="filter" href="/guides/path-based-filtering">
+    Master path-based filtering techniques
+  </Card>
+  
+  <Card title="Content Filtering" icon="file-code" href="/guides/content-based-filtering">
+    Learn to filter by file content
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/python-callbacks">
+    Python callbacks for advanced usage
+  </Card>
+</CardGroup>

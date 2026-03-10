@@ -1,0 +1,347 @@
+---
+title: Real User Scenarios
+description: Examples from real user issues and use cases
+---
+
+This page contains examples from real users who have filed issues or questions about git-filter-repo. These scenarios demonstrate practical solutions to common and uncommon repository filtering challenges.
+
+## Adding Files to Root Commits
+
+Add a LICENSE file and .gitignore to the very first commit(s) in history:
+
+<CodeGroup>
+```bash Using commit-callback
+git filter-repo --commit-callback "if not commit.parents: commit.file_changes += [
+    FileChange(b'M', b'README.md', b'$(git hash-object -w '/path/to/existing/README.md')', b'100644'), 
+    FileChange(b'M', b'src/.gitignore', b'$(git hash-object -w '/home/myusers/mymodule.gitignore')', b'100644')]"
+```
+
+```bash Using insert-beginning script
+mv /path/to/existing/README.md README.md
+mv /home/myusers/mymodule.gitignore src/.gitignore
+insert-beginning --file README.md
+insert-beginning --file src/.gitignore
+```
+</CodeGroup>
+
+The `insert-beginning` script is available in the `contrib/filter-repo-demos/` directory.
+
+## Purging a Large List of Files
+
+When you have many files to remove, create a text file with one path per line:
+
+```bash Create deletion list
+cat > ../DELETED_FILENAMES.txt <<EOF
+src/old-feature/
+build/artifacts/
+config/secrets.yml
+EOF
+```
+
+```bash Remove files
+git filter-repo --invert-paths --paths-from-file ../DELETED_FILENAMES.txt
+```
+
+## Extracting a Library from a Repo
+
+Keep a subdirectory but rename it to a higher-level directory:
+
+```bash
+git filter-repo \
+    --path src/some-folder/some-feature/ \
+    --path-rename src/some-folder/some-feature/:src/
+```
+
+This is useful when splitting a monorepo or extracting a component that you want to become standalone.
+
+## Replace Words in Commit Messages
+
+Replace "stuff" with "task" in all commit messages:
+
+```bash
+git filter-repo --message-callback 'return message.replace(b"stuff", b"task")'
+```
+
+For more complex replacements using regex:
+
+```bash
+git filter-repo --message-callback '
+    import re
+    return re.sub(b"JIRA-\\d+", b"PROJECT-\\1", message)
+    '
+```
+
+## Keep Files from Specific Branches Only
+
+Delete all files except those currently present on two specific branches:
+
+```bash
+git ls-tree -r ${BRANCH1} >../my-files
+git ls-tree -r ${BRANCH2} >>../my-files
+sort ../my-files | uniq >../my-relevant-files
+git filter-repo --paths-from-file ../my-relevant-files
+```
+
+## Renormalize Line Endings
+
+Convert all line endings and add a `.gitattributes` file:
+
+```bash
+contrib/filter-repo-demos/lint-history dos2unix
+# Edit .gitattributes with desired settings
+contrib/filter-repo-demos/insert-beginning .gitattributes
+```
+
+## Remove Trailing Whitespace
+
+Remove all spaces at the end of lines, including converting CRLF to LF:
+
+```bash
+git filter-repo --replace-text <(echo 'regex:[\r\t ]+(\n|$)==>\n')
+```
+
+## Complex Include/Exclude Rules
+
+Include all files under `src/` except `src/README.md`:
+
+```bash
+git filter-repo --filename-callback '
+    if filename == b"src/README.md":
+        return None
+    if filename.startswith(b"src/"):
+        return filename
+  return None'
+```
+
+This pattern is useful when you need both inclusion and exclusion logic that can't be expressed with simple `--path` arguments.
+
+## Removing Paths by Extension
+
+<CodeGroup>
+```bash Using path-glob
+git filter-repo --invert-paths --path-glob '*.xsa'
+```
+
+```bash Using filename-callback
+git filter-repo --filename-callback '
+    if filename.endswith(b".xsa"):
+        return None
+    return filename'
+```
+</CodeGroup>
+
+## Removing a Specific Directory
+
+```bash
+git filter-repo --path node_modules/electron/dist/ --invert-paths
+```
+
+## Converting NFD Filenames to NFC
+
+Mac systems use NFD (decomposed) Unicode normalization, which can cause issues. Convert to NFC (composed):
+
+<CodeGroup>
+```bash Using iconv
+git filter-repo --filename-callback '
+    try: 
+        return subprocess.check_output("iconv -f utf-8-mac -t utf-8".split(),
+                                       input=filename)
+    except:
+        return filename
+'
+```
+
+```bash Using Python unicodedata
+git filter-repo --filename-callback '
+    import unicodedata
+    try:
+       return bytearray(unicodedata.normalize("NFC", filename.decode("utf-8")), "utf-8")
+    except:
+      return filename
+'
+```
+</CodeGroup>
+
+## Set Committer for Recent Commits
+
+Change the committer of the last 5 commits:
+
+```bash
+git filter-repo --refs main~5..main --commit-callback '
+    commit.committer_name = b"My Wonderful Self"
+    commit.committer_email = b"my@self.org"
+'
+```
+
+## Handling Special Characters in Names
+
+When dealing with names containing accents, umlauts, or other multi-byte characters:
+
+```bash
+git filter-repo --refs main~5..main --commit-callback '
+    if commit.author_email == b"example@test.com":
+        commit.author_name = "Raphaël González".encode()
+        commit.author_email = b"rgonzalez@test.com"
+'
+```
+
+<Note>
+  Python doesn't allow multi-byte characters directly in bytestrings, so use `.encode()` to convert from a Unicode string.
+</Note>
+
+## Handling Repository Corruption
+
+### Corrupt Commit Objects
+
+If `git fsck` reports corrupt commits:
+
+```bash Check for corruption
+git fsck --full
+```
+
+```bash Fix corrupt commit
+# Extract the corrupt commit
+git cat-file -p 166f57b3fbe31257100361ecaf735f305b533b21 >tmp
+
+# Edit tmp to fix the error (e.g., add missing space)
+# Then create a replacement:
+git replace -f 166f57b3fbe31257100361ecaf735f305b533b21 \
+    $(git hash-object -t commit -w tmp)
+
+rm tmp
+git filter-repo --proceed
+```
+
+### Corrupt Tree Objects
+
+For corrupt trees with duplicate entries:
+
+```bash Fix corrupt tree
+# Extract the corrupt tree
+git cat-file -p c15680eae81cc8539af7e7de766a8a7c13bd27df >tmp
+
+# Edit tmp to remove duplicate entry
+# Create replacement tree:
+git mktree <tmp
+# Output: ace04f50a5d13b43e94c12802d3d8a6c66a35b1d
+
+git replace -f c15680eae81cc8539af7e7de766a8a7c13bd27df \
+    ace04f50a5d13b43e94c12802d3d8a6c66a35b1d
+
+rm tmp
+git filter-repo --proceed
+```
+
+<Warning>
+  Create replacements for all corrupt objects before running `git filter-repo`.
+</Warning>
+
+## Removing Files with Backslashes
+
+Remove any file with a backslash in its path (common issue from Windows):
+
+```bash
+git filter-repo --filename-callback 'return None if b"\\" in filename else filename'
+```
+
+## Replace a Binary Blob in History
+
+Replace a sensitive image file throughout history:
+
+<CodeGroup>
+```bash Using blob-callback
+git filter-repo --blob-callback '
+    if blob.original_id == b"f4ede2e944868b9a08401dafeb2b944c7166fd0a":
+        blob.data = open("../alternative-file.jpg", "rb").read()
+'
+```
+
+```bash Using git replace
+git replace -f f4ede2e944868b9a08401dafeb2b944c7166fd0a \
+    $(git hash-object -w ../alternative-file.jpg)
+git filter-repo --proceed
+```
+</CodeGroup>
+
+## Remove Old History (Commits Older Than N Days)
+
+<Warning>
+  This changes every commit hash and permanently discards history. Only use if you're certain this is what you want.
+</Warning>
+
+```bash
+# Identify the old commit you want to become the new root
+git replace --graft ${OLD_COMMIT}
+git filter-repo --proceed
+```
+
+The `git replace --graft` command with no parent arguments converts `${OLD_COMMIT}` into a root commit, effectively removing all its parents from history.
+
+## Replacing PNGs with Compressed Versions
+
+If you committed large PNGs and later compressed them, you can retroactively use the compressed versions:
+
+```bash Identify blob IDs
+git log -1 --raw --no-abbrev ${COMMIT_WHERE_YOU_COMPRESSED_PNGS}
+```
+
+This shows output like:
+```
+:100755 100755 edf570fde099c0705432a389b96cb86489beda09 9cce52ae0806d695956dcf662cd74b497eaa7b12 M      resources/foo.png
+:100755 100755 644f7c55e1a88a29779dc86b9ff92f512bf9bc11 88b02e9e45c0a62db2f1751b6c065b0c2e538820 M      resources/bar.png
+```
+
+```bash Replace old with new
+git filter-repo --file-info-callback '
+    if filename == b"resources/foo.png" and blob_id == b"edf570fde099c0705432a389b96cb86489beda09":
+        blob_id = b"9cce52ae0806d695956dcf662cd74b497eaa7b12"
+    if filename == b"resources/bar.png" and blob_id == b"644f7c55e1a88a29779dc86b9ff92f512bf9bc11":
+        blob_id = b"88b02e9e45c0a62db2f1751b6c065b0c2e538820"
+    return (filename, mode, blob_id)
+'
+```
+
+## Updating Submodule Hashes
+
+If wrong submodule commit hashes were recorded, you can fix them:
+
+```bash
+git filter-repo --file-info-callback '
+    if filename == b"src/my-submodule" and blob_id == b"edf570fde099c0705432a389b96cb86489beda09":
+        blob_id = b"9cce52ae0806d695956dcf662cd74b497eaa7b12"
+    if filename == b"src/my-submodule" and blob_id == b"644f7c55e1a88a29779dc86b9ff92f512bf9bc11":
+        blob_id = b"88b02e9e45c0a62db2f1751b6c065b0c2e538820"
+    return (filename, mode, blob_id)
+'
+```
+
+<Note>
+  `blob_id` is somewhat of a misnomer here since the file's hash actually refers to a commit from the sub-project, but that's the parameter name used by `--file-info-callback`.
+</Note>
+
+## Using Multi-line Strings in Callbacks
+
+When callbacks add spaces at the front of every line, use `textwrap.dedent`:
+
+```bash Without dedent (incorrect)
+git filter-repo --blob-callback '
+  blob.data = bytes("""\
+This is the new
+file that I am
+replacing every blob
+with.  It is great.\n""", "utf-8")
+'
+# Results in unwanted leading spaces
+```
+
+```bash With dedent (correct)
+git filter-repo --blob-callback '
+  import textwrap
+  blob.data = bytes(textwrap.dedent("""\
+    This is the new
+    file that I am
+    replacing every blob
+    with.  It is great.\n"""), "utf-8")
+'
+# Results in clean output with no leading spaces
+```

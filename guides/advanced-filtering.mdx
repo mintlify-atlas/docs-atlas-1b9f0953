@@ -1,0 +1,507 @@
+---
+title: 'Advanced Filtering'
+description: 'Complex filtering operations using callbacks and advanced techniques'
+---
+
+## Overview
+
+Advanced filtering uses Python callbacks to give you complete control over the filtering process. This enables complex operations that can't be achieved with simple command-line options.
+
+## Understanding Callbacks
+
+Callbacks are Python functions that filter-repo calls for each git object. You provide the function body as a string.
+
+### Basic Callback Structure
+
+For a callback like `--name-callback`, filter-repo creates:
+
+```python
+def name_callback(name):
+  YOUR_CODE_HERE
+  return modified_name
+```
+
+You only provide the `YOUR_CODE_HERE` part.
+
+<Note>
+**Bytestrings Required**
+
+git-filter-repo uses bytestrings (bytes), not strings:
+- Use `b"text"` instead of `"text"`
+- Compare with `b"value"` not `"value"`
+- Use `.replace(b"old", b"new")`
+</Note>
+
+## Simple Callbacks
+
+### Name Callback
+
+Modify author, committer, and tagger names:
+
+```bash
+git filter-repo --name-callback '
+  return name.replace(b"Wiliam", b"William")
+'
+```
+
+### Email Callback
+
+Fix email addresses:
+
+```bash
+git filter-repo --email-callback '
+  # Fix common typos
+  email = email.replace(b".cm", b".com")
+  email = email.replace(b"gmial.com", b"gmail.com")
+  return email
+'
+```
+
+### Refname Callback
+
+Modify branch and tag names:
+
+```bash
+git filter-repo --refname-callback '
+  # Add prefix to all branches (refs/heads/main -> refs/heads/v2-main)
+  if refname.startswith(b"refs/heads/"):
+    branch = refname[11:]  # Remove "refs/heads/"
+    return b"refs/heads/v2-" + branch
+  return refname
+'
+```
+
+<Warning>
+Refnames must be fully qualified:
+- Use `b"refs/heads/main"` not `b"main"`
+- Use `b"refs/tags/v1.0"` not `b"v1.0"`
+</Warning>
+
+### Filename Callback
+
+Rename or remove files:
+
+```bash
+git filter-repo --filename-callback '
+  # Remove all files in src/ subdirectories (except toplevel src/)
+  if b"/src/" in filename:
+    return None  # Delete file
+  
+  # Rename tools/ -> scripts/misc/
+  if filename.startswith(b"tools/"):
+    return b"scripts/misc/" + filename[6:]
+  
+  # Keep all other files unchanged
+  return filename
+'
+```
+
+Return values:
+- `filename` - Keep file unchanged
+- Modified filename - Rename file
+- `None` - Remove file from history
+
+### Message Callback
+
+Modify commit and tag messages:
+
+```bash
+git filter-repo --message-callback '
+  # Add Signed-off-by if missing
+  if b"Signed-off-by:" not in message:
+    message += b"\nSigned-off-by: Me Myself <me@example.com>"
+  
+  # Fix typos
+  message = re.sub(b"[Ee]-?[Mm][Aa][Ii][Ll]", b"email", message)
+  
+  return message
+'
+```
+
+## Object Callbacks
+
+More powerful callbacks that operate on complete git objects.
+
+### Blob Callback
+
+Modify file contents:
+
+```bash
+git filter-repo --blob-callback '
+  # Skip blobs over 25 bytes
+  if len(blob.data) > 25:
+    blob.skip()
+  else:
+    blob.data = blob.data.replace(b"Hello", b"Goodbye")
+'
+```
+
+**Blob properties:**
+- `blob.data` - File contents (bytes)
+- `blob.original_id` - Original git hash
+- `blob.id` - New git object ID
+- `blob.skip()` - Remove this blob
+
+### Commit Callback
+
+Modify commits:
+
+```bash
+git filter-repo --commit-callback '
+  # Remove executable files with "666" in their name
+  commit.file_changes = [
+    change for change in commit.file_changes
+    if not (change.mode == b"100755" and b"666" in change.filename)
+  ]
+  
+  # Prevent deletion of specific file
+  commit.file_changes = [
+    change for change in commit.file_changes
+    if not (change.type == b"D" and change.filename == b"important.txt")
+  ]
+  
+  # Make all .sh files executable
+  for change in commit.file_changes:
+    if change.filename.endswith(b".sh"):
+      change.mode = b"100755"
+'
+```
+
+**Commit properties:**
+- `commit.branch` - Branch name (bytes)
+- `commit.original_id` - Original commit hash
+- `commit.author_name`, `commit.author_email`, `commit.author_date`
+- `commit.committer_name`, `commit.committer_email`, `commit.committer_date`
+- `commit.message` - Commit message (bytes)
+- `commit.parents` - List of parent commit IDs
+- `commit.file_changes` - List of FileChange objects
+- `commit.skip(new_id)` - Skip this commit
+
+**FileChange properties:**
+- `change.type` - `b"M"` (modify), `b"D"` (delete), `b"DELETEALL"`
+- `change.filename` - Path (bytes)
+- `change.mode` - File mode: `b"100644"`, `b"100755"`, `b"120000"`, `b"160000"`
+- `change.blob_id` - Git blob ID
+
+### Tag Callback
+
+Modify annotated tags:
+
+```bash
+git filter-repo --tag-callback '
+  # Skip tags by specific author
+  if tag.tagger_name == b"Jim Williams":
+    tag.skip()
+  else:
+    # Add extra info to tag message
+    tag.message += b"\n\nTag of %s by %s on %s" % (
+      tag.ref, tag.tagger_email, tag.tagger_date
+    )
+'
+```
+
+**Tag properties:**
+- `tag.ref` - Tag name (without refs/tags/ prefix)
+- `tag.from_ref` - Commit being tagged
+- `tag.original_id` - Original tag hash
+- `tag.tagger_name`, `tag.tagger_email`, `tag.tagger_date`
+- `tag.message` - Tag message
+- `tag.skip()` - Remove this tag
+
+### Reset Callback
+
+Modify reset (branch creation) events:
+
+```bash
+git filter-repo --reset-callback '
+  # Rename master branch to main
+  reset.ref = reset.ref.replace(b"master", b"main")
+'
+```
+
+**Reset properties:**
+- `reset.ref` - Reference name
+- `reset.from_ref` - Commit hash or mark
+
+## Advanced Use Cases
+
+### Multi-Line Callbacks
+
+Use multi-line Python code:
+
+```bash
+git filter-repo --filename-callback '
+  # Define a mapping
+  renames = {
+    b"README": b"README.md",
+    b"COPYING": b"LICENSE",
+    b"AUTHORS": b"CONTRIBUTORS.md",
+  }
+  
+  # Apply renames
+  if filename in renames:
+    return renames[filename]
+  
+  # Remove backup files
+  if filename.endswith(b".bak") or filename.endswith(b"~"):
+    return None
+  
+  return filename
+'
+```
+
+### Using Regular Expressions
+
+The `re` module is available:
+
+```bash
+git filter-repo --message-callback '
+  # Convert issue references: #123 -> JIRA-123
+  message = re.sub(b"#(\\d+)", b"JIRA-\\1", message)
+  
+  # Remove trailing whitespace from each line
+  lines = message.split(b"\\n")
+  lines = [re.sub(b"\\s+$", b"", line) for line in lines]
+  message = b"\\n".join(lines)
+  
+  return message
+'
+```
+
+### Accessing Metadata
+
+Commit callback receives additional metadata:
+
+```bash
+git filter-repo --commit-callback '
+  # aux_info contains:
+  # - orig_parents: original parent commit IDs
+  # - had_file_changes: whether commit had file changes
+  
+  # Example: Mark commits that lost all files
+  if not commit.file_changes and aux_info["had_file_changes"]:
+    commit.message += b"\n\n[Note: All file changes filtered out]"
+'
+```
+
+### Conditional Processing
+
+```bash
+git filter-repo --blob-callback '
+  # Only process small text files
+  if len(blob.data) > 1024 * 1024:  # > 1MB
+    return
+  
+  if b"\\0" in blob.data[0:8192]:  # Binary file
+    return
+  
+  # Safe to process as text
+  blob.data = blob.data.upper()
+'
+```
+
+## Combining Callbacks
+
+Use multiple callbacks together:
+
+```bash
+git filter-repo \
+  --name-callback 'return name.title()' \
+  --email-callback 'return email.lower()' \
+  --filename-callback '
+    if filename.endswith(b".tmp"):
+      return None
+    return filename
+  ' \
+  --message-callback '
+    return message.replace(b"TODO", b"DONE")
+  '
+```
+
+## Complex Examples
+
+### Enforce File Naming Convention
+
+```bash
+git filter-repo --filename-callback '
+  # Convert to lowercase
+  parts = filename.split(b"/")
+  parts[-1] = parts[-1].lower()
+  filename = b"/".join(parts)
+  
+  # Replace spaces with hyphens
+  filename = filename.replace(b" ", b"-")
+  
+  # Remove special characters
+  filename = re.sub(b"[^a-z0-9/_.-]", b"", filename)
+  
+  return filename
+'
+```
+
+### Add File Headers
+
+```bash
+git filter-repo --blob-callback '
+  # Skip binary files
+  if b"\\0" in blob.data[0:8192]:
+    return
+  
+  # Add copyright header to source files
+  header = b"""# Copyright (C) 2024 Example Corp
+# Licensed under MIT License
+
+"""
+  
+  if not blob.data.startswith(b"# Copyright"):
+    blob.data = header + blob.data
+'
+```
+
+### Squash Small Commits
+
+This requires more complex logic:
+
+```bash
+git filter-repo --commit-callback '
+  # Skip commits with tiny messages
+  if len(commit.message) < 10:
+    commit.skip(commit.first_parent())
+'
+```
+
+<Note>
+`commit.skip(new_id)` marks the commit as skipped and maps its ID to `new_id`. Children of this commit will use `new_id` as their parent.
+</Note>
+
+### Rewrite Dates
+
+```bash
+git filter-repo --commit-callback '
+  # Make all commits appear to be from 2024
+  import time
+  from datetime import datetime
+  
+  # Parse existing date
+  timestamp, timezone = commit.author_date.split()
+  dt = datetime.fromtimestamp(int(timestamp))
+  
+  # Update year
+  new_dt = dt.replace(year=2024)
+  new_timestamp = int(new_dt.timestamp())
+  
+  # Update both author and committer dates
+  commit.author_date = b"%d %s" % (new_timestamp, timezone)
+  commit.committer_date = commit.author_date
+'
+```
+
+### Remove Merge Commits
+
+```bash
+git filter-repo --commit-callback '
+  # Skip merge commits (commits with multiple parents)
+  if len(commit.parents) > 1:
+    commit.skip(commit.first_parent())
+'
+```
+
+## Using External Scripts
+
+For very complex logic, use external Python scripts:
+
+```bash
+git filter-repo --commit-callback "$(cat my_callback.py)"
+```
+
+**my_callback.py:**
+```python
+import json
+
+# Load configuration
+with open('filter-config.json', 'rb') as f:
+  config = json.load(f)
+
+# Complex filtering logic
+if commit.branch in config['protected_branches']:
+  return
+
+# ... more logic ...
+```
+
+## Performance Tips
+
+<Tip>
+**Optimize Callbacks**
+
+1. **Avoid expensive operations** in hot paths
+2. **Cache results** when possible
+3. **Short-circuit** early if possible
+4. **Use bytestring operations** (faster than string)
+
+```python
+# Good: Short-circuit early
+if not filename.endswith(b".py"):
+  return filename
+# ... expensive processing ...
+
+# Bad: Always processes
+# ... expensive processing ...
+if filename.endswith(b".py"):
+  return modified_filename
+return filename
+```
+</Tip>
+
+<Warning>
+**Callback Errors**
+
+If a callback raises an exception, filter-repo will abort. Test thoroughly:
+
+```bash
+# Test on a small branch first
+git filter-repo --refs test-branch --callback '...'
+```
+</Warning>
+
+## Available Modules
+
+These Python modules are available in callbacks:
+
+- `argparse` - Argument parsing
+- `collections` - Container datatypes
+- `fnmatch` - Filename pattern matching
+- `io` - I/O operations
+- `os` - Operating system interface
+- `platform` - Platform identification
+- `re` - Regular expressions
+- `shutil` - High-level file operations
+- `subprocess` - Subprocess management
+- `sys` - System-specific parameters
+- `time` - Time access
+- `textwrap` - Text wrapping
+- `datetime` - Date/time handling
+
+Plus all filter-repo classes:
+- `Blob`, `Commit`, `Tag`, `Reset`, `FileChange`
+- `FilteringOptions`, `RepoFilter`
+
+## API Compatibility Warning
+
+<Warning>
+**API May Change**
+
+The callback API is NOT guaranteed to be stable. If you write scripts that use callbacks:
+
+1. Pin to a specific git-filter-repo version
+2. Test after any upgrades
+3. Contribute test cases for APIs you rely on
+
+See [Library Usage](/guides/library-usage) for more stable APIs.
+</Warning>
+
+## Next Steps
+
+- Learn [Library Usage](/guides/library-usage) for more control
+- Review [Commit Message Rewriting](/guides/commit-message-rewriting)
+- Check out example scripts in `contrib/filter-repo-demos/`

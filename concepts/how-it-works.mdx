@@ -1,0 +1,188 @@
+---
+title: 'How It Works'
+description: 'Understanding the fast-export | filter | fast-import pipeline that powers git-filter-repo'
+icon: 'gear'
+---
+
+## Overview
+
+git-filter-repo works by creating a processing pipeline that transforms Git history in a streaming fashion:
+
+```
+git fast-export <options> | filter | git fast-import <options>
+```
+
+This pipeline-based architecture is what makes git-filter-repo extremely fast and memory-efficient, even for large repositories.
+
+## The Three-Stage Pipeline
+
+### Stage 1: Fast-Export
+
+The `git fast-export` command reads your Git repository and outputs a stream representation of all commits, trees, and blobs in a text-based format.
+
+<Info>
+Fast-export produces a textual stream that includes:
+- Blob objects (file contents)
+- Commit objects (metadata, messages, parents)
+- File changes (modifications, deletions)
+- Tags and branch references
+</Info>
+
+This format is designed to be:
+- **Human-readable**: You can inspect the stream to understand what's being processed
+- **Streamable**: Objects can be processed one at a time without loading everything into memory
+- **Complete**: Contains all the information needed to reconstruct the entire repository history
+
+### Stage 2: Filter (git-filter-repo's Core)
+
+The middle stage is where git-filter-repo acts as an intelligent filter. It:
+
+1. **Parses** the fast-export stream into Python objects (Blob, Commit, FileChange, Tag, etc.)
+2. **Processes** each object according to your filtering rules
+3. **Modifies** objects as needed (renaming paths, changing commit messages, removing files)
+4. **Outputs** the modified stream in fast-import format
+
+<Accordion title="How git-filter-repo processes the stream">
+  git-filter-repo creates objects like:
+  - `Blob`: Represents file contents
+  - `Commit`: Contains author, committer, message, file changes, and parents
+  - `FileChange`: Tracks modifications, deletions, or additions to files
+  - `Tag`: Annotated tag information
+  - `Reset`: Branch creation or updates
+
+  These objects can be modified via callbacks or built-in filters before being written to the output stream.
+</Accordion>
+
+### Stage 3: Fast-Import
+
+The `git fast-import` command reads the filtered stream and reconstructs the Git repository with the modified history.
+
+<Note>
+Fast-import creates new Git objects with new SHA-1 hashes, since any modification to history necessarily changes the content being hashed.
+</Note>
+
+This stage:
+- Creates new blob objects for files
+- Constructs new commit objects with updated references
+- Updates branch pointers and tags
+- Builds the new packfile with the rewritten history
+
+## Why This Architecture Is Fast
+
+### Memory Efficiency
+
+Unlike `git filter-branch`, which checks out each commit to a working directory, git-filter-repo:
+- **Streams data**: Processes one object at a time
+- **No working directory**: Never materializes files to disk
+- **Minimal overhead**: Only holds current object being processed in memory
+
+### No Subprocess Overhead
+
+While the pipeline uses `git fast-export` and `git fast-import` as subprocesses, git-filter-repo itself:
+- **Processes in a single Python process**: No spawning shells for each commit
+- **Native string/bytes operations**: Efficient text processing without external tools
+- **Rich data structures**: Uses Python's dicts, lists, and objects instead of shell variables
+
+### Optimized for Git's Architecture
+
+Fast-export and fast-import are:
+- **Native Git commands**: Written in C, highly optimized
+- **Purpose-built**: Specifically designed for repository import/export
+- **Actively maintained**: Benefit from ongoing Git development
+
+<Info>
+git-filter-repo has even driven improvements in Git itself! The tool's author has contributed numerous enhancements to fast-export and fast-import based on filter-repo's needs.
+</Info>
+
+## Additional Processing
+
+Beyond the core pipeline, git-filter-repo also:
+
+1. **Validates repository state**: Ensures you're working with a fresh clone (see [Fresh Clone Requirements](/concepts/fresh-clone))
+2. **Rewrites commit references**: Updates commit IDs referenced in commit messages
+3. **Prunes empty commits**: Removes commits that become empty after filtering
+4. **Handles topology changes**: Manages merge commits when parents are pruned
+5. **Cleans up cruft**: Expires reflogs, repacks the repository, and removes old references
+6. **Updates remotes**: Removes origin remote to prevent accidental pushes
+
+## Extensibility
+
+The architecture allows you to extend git-filter-repo in multiple ways:
+
+<CardGroup cols={2}>
+  <Card title="Callbacks" icon="code">
+    Register Python functions to process each object type (blob, commit, tag, etc.)
+  </Card>
+  <Card title="Library Usage" icon="book">
+    Import git-filter-repo as a Python module to build custom history rewriting tools
+  </Card>
+</CardGroup>
+
+## Example: Following a Blob Through the Pipeline
+
+Let's trace how a file modification flows through the pipeline:
+
+1. **Fast-export outputs**:
+   ```
+   blob
+   mark :1
+   data 14
+   Hello, World!
+   
+   commit refs/heads/main
+   mark :2
+   author John Doe <john@example.com> 1234567890 +0000
+   committer John Doe <john@example.com> 1234567890 +0000
+   data 13
+   Add greeting
+   M 100644 :1 hello.txt
+   ```
+
+2. **git-filter-repo processes**:
+   - Creates a `Blob` object with content "Hello, World!"
+   - Creates a `Commit` object with a `FileChange` for `hello.txt`
+   - If you're filtering paths, might rename `hello.txt` to `src/hello.txt`
+   - Modifies the FileChange object to reflect the new path
+
+3. **Fast-import receives**:
+   ```
+   blob
+   mark :1
+   data 14
+   Hello, World!
+   
+   commit refs/heads/main
+   mark :2
+   author John Doe <john@example.com> 1234567890 +0000
+   committer John Doe <john@example.com> 1234567890 +0000
+   data 13
+   Add greeting
+   M 100644 :1 src/hello.txt
+   ```
+
+4. **Result**: A new repository with the file at `src/hello.txt` instead of `hello.txt`
+
+<Warning>
+Because history is being rewritten, all commit SHA-1 hashes will be different in the new repository. This is unavoidable when modifying history.
+</Warning>
+
+## Performance Characteristics
+
+| Aspect | git filter-branch | git-filter-repo |
+|--------|-------------------|------------------|
+| Processing model | Checkout each commit | Stream processing |
+| Speed | Extremely slow | Multiple orders of magnitude faster |
+| Memory usage | High (working directory) | Low (streaming) |
+| Subprocess overhead | High (shells per commit) | Minimal (single Python process) |
+| Scriptability | Shell (OS-specific) | Python (cross-platform) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Design Rationale" icon="compass" href="/concepts/design-rationale">
+    Learn why git-filter-repo was built and its 12 design goals
+  </Card>
+  <Card title="Fresh Clone Requirements" icon="clone" href="/concepts/fresh-clone">
+    Understand why fresh clones are required for safety
+  </Card>
+</CardGroup>

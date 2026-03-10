@@ -1,122 +1,120 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "git-filter-repo",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#fa4c2a",
+    "light": "#443b33",
+    "dark": "#fa4c2a"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/640d8e38-cc02-4dbe-8943-3a145e37f9ef.png",
+  "logo": {
+    "light": "https://media.brand.dev/36949707-debc-4882-9753-131bf18d268a.png",
+    "dark": "https://media.brand.dev/36949707-debc-4882-9753-131bf18d268a.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/newren/git-filter-repo"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/newren/git-filter-repo"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/how-it-works",
+              "concepts/design-rationale",
+              "concepts/fresh-clone"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Common Use Cases",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "use-cases/extracting-subdirectory",
+              "use-cases/removing-sensitive-data",
+              "use-cases/path-renaming",
+              "use-cases/analyzing-repository"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Guides",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/basic-filtering",
+              "guides/advanced-filtering",
+              "guides/path-based-filtering",
+              "guides/content-based-filtering",
+              "guides/commit-message-rewriting",
+              "guides/library-usage"
+            ]
+          },
+          {
+            "group": "Migration Guides",
+            "pages": [
+              "migration/from-filter-branch",
+              "migration/from-bfg"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/cheat-sheet",
+              "examples/user-scenarios",
+              "examples/demo-scripts"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/faq",
+              "resources/troubleshooting",
+              "resources/contributing"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Command Line",
             "pages": [
-              "api-reference/introduction"
+              "api/cli-overview",
+              "api/path-options",
+              "api/content-options",
+              "api/rename-options",
+              "api/commit-options",
+              "api/ref-options",
+              "api/output-options"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Python Library",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/python-overview",
+              "api/python-data-structures",
+              "api/python-filtering",
+              "api/python-callbacks"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

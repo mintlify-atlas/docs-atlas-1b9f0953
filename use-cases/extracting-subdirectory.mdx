@@ -1,0 +1,120 @@
+---
+title: Extracting a Subdirectory
+description: Learn how to extract a subdirectory from a repository while preserving its history
+---
+
+One of the most common uses of git-filter-repo is extracting a subdirectory from a repository to create a standalone project or prepare it for merging into another repository.
+
+## Basic Extraction
+
+To extract a single directory and make it the root of your repository:
+
+<Steps>
+  <Step title="Clone the repository">
+    Start with a fresh clone of your repository:
+    ```bash
+    git clone https://github.com/example/repo.git
+    cd repo
+    ```
+    
+    <Note>
+      git-filter-repo requires a fresh clone as a safety measure. Use `--force` to override this requirement if absolutely necessary.
+    </Note>
+  </Step>
+
+  <Step title="Extract the subdirectory">
+    Use the `--subdirectory-filter` option to extract a directory:
+    ```bash
+    git filter-repo --subdirectory-filter src/
+    ```
+    
+    This will:
+    - Keep only files under `src/`
+    - Move `src/` contents to the repository root
+    - Remove commits that only touched files outside `src/`
+  </Step>
+
+  <Step title="Verify the results">
+    Check that the extraction worked correctly:
+    ```bash
+    git log --oneline
+    ls -la
+    ```
+  </Step>
+</Steps>
+
+## Extract and Rename to Subdirectory
+
+For merging into another repository, you may want to extract a directory but place it under a new path:
+
+```bash
+git filter-repo --path src/ --to-subdirectory-filter my-module
+```
+
+This command:
+- Extracts only the `src/` directory
+- Places it under `my-module/src/` in the filtered repository
+- Preserves the full history
+
+## Advanced: Extract and Rename
+
+Extract a specific subdirectory and rename it to a different path:
+
+```bash
+git filter-repo \
+    --path src/some-folder/some-feature/ \
+    --path-rename src/some-folder/some-feature/:src/
+```
+
+This keeps `src/some-folder/some-feature/` but renames it to `src/`.
+
+## Complete Example: Prepare for Merging
+
+When preparing a subdirectory to merge into another repository:
+
+<Steps>
+  <Step title="Extract and reorganize">
+    ```bash
+    git filter-repo \
+        --path src/ \
+        --to-subdirectory-filter my-module \
+        --tag-rename '':'my-module-'
+    ```
+    
+    This command:
+    - Extracts the `src/` directory
+    - Moves it to `my-module/src/`
+    - Prefixes all tags with `my-module-` to avoid conflicts
+  </Step>
+
+  <Step title="Add the remote">
+    ```bash
+    cd ../target-repo
+    git remote add extracted-module ../repo
+    git fetch extracted-module
+    ```
+  </Step>
+
+  <Step title="Merge the history">
+    ```bash
+    git merge --allow-unrelated-histories extracted-module/main
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Always work on a fresh clone. git-filter-repo rewrites history and will remove your remote configuration to prevent accidental pushes.
+</Warning>
+
+## Extracting Multiple Paths
+
+To extract multiple directories or files:
+
+```bash
+git filter-repo \
+    --path dir1/ \
+    --path dir2/ \
+    --path important-file.txt
+```
+
+All specified paths will be retained while everything else is removed.
