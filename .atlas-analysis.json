@@ -1,0 +1,134 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "git-filter-repo",
+  "projectDescription": "Quickly rewrite git repository history (filter-branch replacement)",
+  "theme": "aspen",
+  "primaryColor": "#fa4c2a",
+  "lightColor": "#443b33",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/how-it-works",
+              "concepts/design-rationale",
+              "concepts/fresh-clone"
+            ]
+          },
+          {
+            "group": "Common Use Cases",
+            "pages": [
+              "use-cases/extracting-subdirectory",
+              "use-cases/removing-sensitive-data",
+              "use-cases/path-renaming",
+              "use-cases/analyzing-repository"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/basic-filtering",
+              "guides/advanced-filtering",
+              "guides/path-based-filtering",
+              "guides/content-based-filtering",
+              "guides/commit-message-rewriting",
+              "guides/library-usage"
+            ]
+          },
+          {
+            "group": "Migration Guides",
+            "pages": [
+              "migration/from-filter-branch",
+              "migration/from-bfg"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/cheat-sheet",
+              "examples/user-scenarios",
+              "examples/demo-scripts"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/faq",
+              "resources/troubleshooting",
+              "resources/contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Command Line",
+            "pages": [
+              "api/cli-overview",
+              "api/path-options",
+              "api/content-options",
+              "api/rename-options",
+              "api/commit-options",
+              "api/ref-options",
+              "api/output-options"
+            ]
+          },
+          {
+            "group": "Python Library",
+            "pages": [
+              "api/python-overview",
+              "api/python-data-structures",
+              "api/python-filtering",
+              "api/python-callbacks"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Fast repository history rewriting (orders of magnitude faster than filter-branch)",
+    "Path-based filtering (keep or remove specific paths)",
+    "File and directory renaming",
+    "Commit message rewriting with hash updates",
+    "Repository analysis mode to identify large files and paths",
+    "Tag renaming and filtering",
+    "Python library API for custom filtering scripts",
+    "Automatic cleanup and repository optimization"
+  ],
+  "publicApiSurface": [
+    "git filter-repo --analyze",
+    "git filter-repo --path <path>",
+    "git filter-repo --path-glob <glob>",
+    "git filter-repo --invert-paths",
+    "git filter-repo --to-subdirectory-filter <dir>",
+    "git filter-repo --subdirectory-filter <dir>",
+    "git filter-repo --path-rename <old>:<new>",
+    "git filter-repo --replace-text <expressions-file>",
+    "git filter-repo --strip-blobs-bigger-than <size>",
+    "git filter-repo --tag-rename <old>:<new>",
+    "git filter-repo --mailmap <file>",
+    "git filter-repo --commit-callback <code>",
+    "FilteringOptions",
+    "RepoFilter",
+    "Blob",
+    "Commit",
+    "Tag",
+    "FileChange",
+    "FastExportParser"
+  ]
+}
