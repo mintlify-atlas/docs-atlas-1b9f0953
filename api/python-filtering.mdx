@@ -322,6 +322,60 @@ refs = fr.GitUtils.get_refs(repo_working_dir)
 
 Returns dict mapping ref names (bytes) to commit hashes (bytes).
 
+## FastExportParser
+
+Low-level parser for git fast-export output. Most users won't need this directly as `RepoFilter` handles it internally.
+
+```python
+parser = fr.FastExportParser(
+    blob_callback=None,
+    commit_callback=None,
+    tag_callback=None,
+    reset_callback=None,
+    checkpoint_callback=None,
+    done_callback=None
+)
+```
+
+The parser processes a fast-export stream and calls appropriate callbacks for each object type. It's used internally by `RepoFilter` to parse the output of `git fast-export`.
+
+### Methods
+
+- `parse_stream()` - Parse fast-export output from stdin
+- `parse_file(filename)` - Parse fast-export output from a file
+
+## ProgressWriter
+
+Handles progress output during filtering operations.
+
+```python
+writer = fr.ProgressWriter()
+```
+
+The `ProgressWriter` class writes progress updates to stderr in the format expected by git fast-import. It's used internally by `RepoFilter`.
+
+### Methods
+
+- `write(progress_message)` - Write a progress message
+
+## record_id_rename
+
+Utility function to record object ID translations.
+
+```python
+fr.record_id_rename(old_id, new_id)
+```
+
+<ParamField path="old_id" type="bytes" required>
+Original object ID (mark or hash)
+</ParamField>
+
+<ParamField path="new_id" type="bytes" required>
+New object ID after filtering
+</ParamField>
+
+Used internally to track how object IDs change during filtering. This is particularly important for maintaining consistency when commit IDs are referenced in commit messages.
+
 ## Complete Example
 
 Comprehensive filtering script combining multiple features:

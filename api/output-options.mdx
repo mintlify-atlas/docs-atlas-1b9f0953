@@ -356,6 +356,20 @@ Options that control where git-filter-repo reads from and writes to, plus genera
   [Learn more about analysis →](/use-cases/analyzing-repository)
 </ParamField>
 
+### --proceed
+
+<ParamField path="--proceed" type="boolean" default="false">
+  Avoid triggering the no-arguments-specified check.
+  
+  Use this when you want to run git-filter-repo with only callback options and no filtering flags. Without this flag, git-filter-repo will complain if you don't specify any filtering options.
+  
+  **Example:**
+  ```bash
+  # Run with only a callback, no filtering
+  git filter-repo --commit-callback 'print(commit.message)' --proceed
+  ```
+</ParamField>
+
 ## Usage Examples
 
 ### Filter Between Repositories
